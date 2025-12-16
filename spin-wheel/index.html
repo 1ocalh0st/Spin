@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0b0b14" />
+    <title>决策转盘</title>
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="bg" aria-hidden="true"></div>
+
+    <div class="app">
+      <header class="topbar glass">
+        <div class="brand">
+          <div class="logo" aria-hidden="true"></div>
+          <div class="titles">
+            <div class="title">决策转盘</div>
+            <div class="subtitle">转一下吧！</div>
+          </div>
+        </div>
+
+        <div class="top-actions">
+          <button id="audioToggle" class="icon-btn" type="button" aria-pressed="true" title="音乐">
+            <span class="icon" aria-hidden="true">♪</span>
+          </button>
+        </div>
+      </header>
+
+      <main class="stage">
+        <div id="wheelStage" class="wheel-stage" aria-label="转盘">
+          <div class="wheel-tilt">
+            <canvas id="wheelCanvas"></canvas>
+          </div>
+
+          <div class="pointer" aria-hidden="true">
+            <div class="pointer-glow"></div>
+            <svg viewBox="0 0 24 24" class="pointer-icon">
+              <path d="M12 2 L20 16 L12 13 L4 16 Z" />
+            </svg>
+          </div>
+
+          <div id="lens" class="lens glass" aria-hidden="true">
+            <div class="lens-inner"></div>
+          </div>
+
+          <div id="resultBackdrop" class="result-backdrop" hidden></div>
+
+          <div id="resultCard" class="result-card glass" hidden>
+            <button id="resultClose" class="icon-btn ghost" type="button" aria-label="关闭结果">×</button>
+            <div class="result-label">结果</div>
+            <div id="resultText" class="result-text"></div>
+            <button id="spinAgain" class="secondary-btn" type="button">再转一次</button>
+          </div>
+        </div>
+
+        <button id="spinFab" class="fab" type="button">
+          <span class="fab-label">开始</span>
+        </button>
+      </main>
+
+      <section class="panel glass">
+        <div class="panel-head">
+          <div class="panel-title">选项</div>
+          <div class="panel-actions">
+            <button id="panelToggle" class="secondary-btn" type="button">收起</button>
+            <button id="openWheels" class="secondary-btn" type="button">转盘</button>
+            <button id="openImport" class="secondary-btn" type="button">导入</button>
+            <button id="addOption" class="secondary-btn" type="button">添加</button>
+          </div>
+        </div>
+
+        <div id="panelSizeRow" class="panel-size-row">
+          <div class="panel-size-label">面板高度</div>
+          <input
+            id="panelSizeRange"
+            class="panel-size-range"
+            type="range"
+            min="28"
+            max="70"
+            step="1"
+            value="46"
+            aria-label="面板高度"
+          />
+          <div id="panelSizeValue" class="panel-size-value">46vh</div>
+          <button id="panelSizeReset" class="secondary-btn" type="button">重置</button>
+        </div>
+
+        <div id="optionsList" class="options"></div>
+
+        <div class="preset-row">
+          <select id="presetSelect" class="preset-select" aria-label="预设">
+            <option value="">预设…</option>
+            <option value="couple_movies">帮我生成一组适合情侣看的电影</option>
+            <option value="dinner_ideas">给我10个今天晚餐的选择</option>
+            <option value="date_ideas">帮我想一些周末约会点子</option>
+          </select>
+          <button id="usePreset" class="secondary-btn" type="button">生成</button>
+        </div>
+      </section>
+    </div>
+
+    <dialog id="importDialog" class="import-dialog glass">
+      <form method="dialog" class="import-form">
+        <div class="import-title">快速输入</div>
+        <div class="import-hint">按换行 / 逗号 / ，分割</div>
+        <textarea
+          id="importText"
+          class="import-text"
+          placeholder="选项 A, 选项 B&#10;选项 C"
+        ></textarea>
+        <div class="import-actions">
+          <button id="pasteClipboard" class="secondary-btn" type="button">粘贴</button>
+          <div class="import-actions-right">
+            <button class="secondary-btn" value="cancel" type="submit">取消</button>
+            <button class="primary-btn" value="ok" type="submit">应用</button>
+          </div>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="wheelDialog" class="import-dialog glass">
+      <form method="dialog" class="import-form">
+        <div class="import-title">转盘库</div>
+        <div class="import-hint">保存/载入带概率的转盘配置（仅存本机浏览器）</div>
+
+        <div class="wheel-name-row">
+          <input id="wheelName" class="wheel-name" type="text" maxlength="40" placeholder="转盘名称，例如：今晚吃什么" />
+          <button id="saveWheel" class="primary-btn" type="button">保存</button>
+        </div>
+
+        <div class="wheel-list-row">
+          <select id="wheelSelect" class="preset-select" aria-label="已保存转盘">
+            <option value="">已保存的转盘…</option>
+          </select>
+          <div class="wheel-list-actions">
+            <button id="loadWheel" class="secondary-btn" type="button">载入</button>
+            <button id="deleteWheel" class="secondary-btn" type="button">删除</button>
+          </div>
+        </div>
+
+        <div id="wheelMessage" class="wheel-message" aria-live="polite"></div>
+
+        <div class="import-actions">
+          <div class="import-actions-right">
+            <button class="secondary-btn" value="cancel" type="submit">关闭</button>
+          </div>
+        </div>
+      </form>
+    </dialog>
+
+    <script src="app.js"></script>
+  </body>
+</html>
