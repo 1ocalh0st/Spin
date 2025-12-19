@@ -18,6 +18,7 @@
   const spinFab = document.getElementById("spinFab");
   const spinAgain = document.getElementById("spinAgain");
   const audioToggle = document.getElementById("audioToggle");
+  const audioIcon = document.getElementById("audioIcon");
 
   const optionsListEl = document.getElementById("optionsList");
   const addOptionBtn = document.getElementById("addOption");
@@ -125,16 +126,24 @@
   let lastIndex = 0;
   let lastTickTs = 0;
   let idleT = 0;
-  let lastHeartbeatMs = 0;
+
+  let reduceMotion = false;
+  const reduceMotionQuery = window.matchMedia?.("(prefers-reduced-motion: reduce)") ?? null;
+  reduceMotion = reduceMotionQuery?.matches ?? false;
+  if (reduceMotionQuery) {
+    const update = (event) => {
+      reduceMotion = Boolean(event?.matches);
+    };
+    if (typeof reduceMotionQuery.addEventListener === "function") reduceMotionQuery.addEventListener("change", update);
+    else if (typeof reduceMotionQuery.addListener === "function") reduceMotionQuery.addListener(update);
+  }
 
   let audioEnabled = true;
   let audioCtx = null;
   let masterGain = null;
-  let bgmGain = null;
-  let bgmNodes = [];
   let panelCollapsed = false;
-
-  audioToggle.setAttribute("aria-pressed", audioEnabled ? "true" : "false");
+  let restoreFocusEl = null;
+  let saveCurrentWheelTimer = 0;
 
   if ("serviceWorker" in navigator) {
     window.addEventListener(
@@ -259,11 +268,12 @@
     });
   }
 
-  function setPanelCollapsed(collapsed) {
+  function setPanelCollapsed(collapsed, persist = false) {
     panelCollapsed = Boolean(collapsed);
     panelEl.classList.toggle("collapsed", panelCollapsed);
     panelToggle.textContent = panelCollapsed ? "展开" : "收起";
     panelToggle.setAttribute("aria-expanded", panelCollapsed ? "false" : "true");
+    if (persist) writeStoredBool(PANEL_COLLAPSED_KEY, panelCollapsed);
     scheduleLayout();
   }
 
@@ -352,95 +362,12 @@
       masterGain = audioCtx.createGain();
       masterGain.gain.value = 0.9;
       masterGain.connect(audioCtx.destination);
-
-      bgmGain = audioCtx.createGain();
-      bgmGain.gain.value = 0.0;
-      bgmGain.connect(masterGain);
     }
 
     if (audioCtx.state === "suspended") {
       audioCtx.resume().catch(() => {});
     }
     return true;
-  }
-
-  function startBgmIfNeeded() {
-    if (!ensureAudio()) return;
-    if (bgmNodes.length) return;
-
-    const now = audioCtx.currentTime;
-    const filter = audioCtx.createBiquadFilter();
-    filter.type = "lowpass";
-    filter.frequency.value = 760;
-    filter.Q.value = 0.65;
-    filter.connect(bgmGain);
-
-    const mix = audioCtx.createGain();
-    mix.gain.value = 0.34;
-    mix.connect(filter);
-
-    const voices = [
-      { freq: 220.0, type: "sine", gain: 0.12, pan: -0.18, detune: -6 },
-      { freq: 277.18, type: "triangle", gain: 0.10, pan: 0.12, detune: 6 },
-      { freq: 329.63, type: "sine", gain: 0.09, pan: 0.28, detune: 2 },
-      { freq: 110.0, type: "sine", gain: 0.08, pan: 0.0, detune: 0 },
-    ];
-
-    const nodes = [filter, mix];
-    for (const v of voices) {
-      const osc = audioCtx.createOscillator();
-      osc.type = v.type;
-      osc.frequency.value = v.freq;
-      osc.detune.value = v.detune;
-
-      const gain = audioCtx.createGain();
-      gain.gain.value = v.gain;
-
-      const pan = audioCtx.createStereoPanner();
-      pan.pan.value = v.pan;
-
-      osc.connect(gain);
-      gain.connect(pan);
-      pan.connect(mix);
-      osc.start(now);
-
-      nodes.push(osc, gain, pan);
-    }
-
-    const tremLfo = audioCtx.createOscillator();
-    tremLfo.type = "sine";
-    tremLfo.frequency.value = 0.06;
-
-    const tremGain = audioCtx.createGain();
-    tremGain.gain.value = 0.06;
-    tremLfo.connect(tremGain);
-    tremGain.connect(mix.gain);
-    tremLfo.start(now);
-    nodes.push(tremLfo, tremGain);
-
-    const sweepLfo = audioCtx.createOscillator();
-    sweepLfo.type = "sine";
-    sweepLfo.frequency.value = 0.024;
-
-    const sweepGain = audioCtx.createGain();
-    sweepGain.gain.value = 160;
-    sweepLfo.connect(sweepGain);
-    sweepGain.connect(filter.frequency);
-    sweepLfo.start(now);
-    nodes.push(sweepLfo, sweepGain);
-
-    bgmNodes = nodes;
-    setBgmVolume(0.48, 0.35);
-  }
-
-  function setBgmVolume(target, rampSeconds = 0.18) {
-    if (!audioEnabled) return;
-    if (!ensureAudio()) return;
-    startBgmIfNeeded();
-    const now = audioCtx.currentTime;
-    bgmGain.gain.cancelScheduledValues(now);
-    bgmGain.gain.setValueAtTime(bgmGain.gain.value, now);
-    bgmGain.gain.linearRampToValueAtTime(clamp(target, 0, 1), now + rampSeconds);
   }
 
   function playTickSound(currentOmega) {
@@ -502,67 +429,6 @@
     }, 420);
   }
 
-  function playHeartbeat() {
-    if (!audioEnabled) return;
-    if (!ensureAudio()) return;
-    const now = audioCtx.currentTime;
-
-    function thump(atTime, amp) {
-      const osc = audioCtx.createOscillator();
-      osc.type = "sine";
-      osc.frequency.setValueAtTime(70, atTime);
-      osc.frequency.exponentialRampToValueAtTime(42, atTime + 0.14);
-
-      const filter = audioCtx.createBiquadFilter();
-      filter.type = "lowpass";
-      filter.frequency.value = 140;
-      filter.Q.value = 0.7;
-
-      const gain = audioCtx.createGain();
-      gain.gain.setValueAtTime(0.0001, atTime);
-      gain.gain.linearRampToValueAtTime(amp, atTime + 0.012);
-      gain.gain.exponentialRampToValueAtTime(0.0001, atTime + 0.22);
-
-      osc.connect(gain);
-      gain.connect(filter);
-      filter.connect(masterGain);
-      osc.start(atTime);
-      osc.stop(atTime + 0.26);
-    }
-
-    thump(now, 0.11);
-    thump(now + 0.14, 0.075);
-  }
-
-  function stopBgm(rampSeconds = 0.12) {
-    if (!audioCtx || !bgmGain) return;
-    const now = audioCtx.currentTime;
-    bgmGain.gain.cancelScheduledValues(now);
-    bgmGain.gain.setValueAtTime(bgmGain.gain.value, now);
-    bgmGain.gain.linearRampToValueAtTime(0.0, now + rampSeconds);
-
-    const stopDelayMs = Math.round((rampSeconds + 0.08) * 1000);
-    setTimeout(() => {
-      for (const node of bgmNodes) {
-        if (typeof node.stop === "function") {
-          try {
-            node.stop();
-          } catch {
-            // ignore
-          }
-        }
-        if (typeof node.disconnect === "function") {
-          try {
-            node.disconnect();
-          } catch {
-            // ignore
-          }
-        }
-      }
-      bgmNodes = [];
-    }, stopDelayMs);
-  }
-
   function toggleBodyClass(name, enabled) {
     document.body.classList.toggle(name, enabled);
   }
@@ -586,24 +452,45 @@
     if (suspense === enabled) return;
     suspense = enabled;
     toggleBodyClass("is-suspense", suspense);
-    lastHeartbeatMs = 0;
-    setBgmVolume(suspense ? 0.18 : 0.48, 0.25);
+  }
+
+  function resultFocusables() {
+    return [resultClose, spinAgain].filter((el) => el && typeof el.focus === "function" && !el.disabled);
+  }
+
+  function focusResultPrimary() {
+    const focusables = resultFocusables();
+    const target = focusables.find((el) => el === spinAgain) ?? focusables[0] ?? resultCard;
+    target?.focus?.({ preventScroll: true });
+  }
+
+  function restoreFocusFromResult() {
+    const target = restoreFocusEl;
+    restoreFocusEl = null;
+    if (target && document.documentElement.contains(target) && typeof target.focus === "function") {
+      target.focus({ preventScroll: true });
+      return;
+    }
+    spinFab?.focus?.({ preventScroll: true });
   }
 
   function showResult(text) {
+    restoreFocusEl = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     resultText.textContent = text;
     resultBackdrop.hidden = false;
     resultCard.hidden = false;
     requestAnimationFrame(() => {
       document.body.classList.add("show-result");
+      focusResultPrimary();
     });
   }
 
-  function hideResult() {
+  function hideResult(restoreFocus = true) {
     document.body.classList.remove("show-result");
 
     if (resultCard.hidden) {
       resultBackdrop.hidden = true;
+      if (!restoreFocus) restoreFocusEl = null;
       return;
     }
 
@@ -613,6 +500,8 @@
       done = true;
       resultBackdrop.hidden = true;
       resultCard.hidden = true;
+      if (restoreFocus) restoreFocusFromResult();
+      else restoreFocusEl = null;
     };
 
     resultCard.addEventListener("transitionend", finish, { once: true });
@@ -643,14 +532,81 @@
     options = sanitized.length ? sanitized : ["选项 1", "选项 2"];
     if (options.length < 2) options.push("选项 2");
     weights = options.map(() => 1);
+    scheduleSaveCurrentWheel();
     renderOptionsList();
-    hideResult();
+    hideResult(false);
     scheduleLayout();
   }
 
   const WHEELS_STORAGE_KEY = "spinWheel.wheels.v1";
-  const MAX_SAVED_WHEELS = 40;
+  const CURRENT_WHEEL_KEY = "spinWheel.currentWheel.v1";
+  const AUDIO_ENABLED_KEY = "spinWheel.audioEnabled.v1";
   const PANEL_SIZE_KEY = "spinWheel.panelSizeVh.v1";
+  const PANEL_COLLAPSED_KEY = "spinWheel.panelCollapsed.v1";
+  const MAX_SAVED_WHEELS = 40;
+
+  function readStoredBool(key) {
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw == null) return null;
+      if (raw === "1" || raw === "true") return true;
+      if (raw === "0" || raw === "false") return false;
+    } catch {
+      // ignore
+    }
+    return null;
+  }
+
+  function writeStoredBool(key, value) {
+    try {
+      localStorage.setItem(key, value ? "1" : "0");
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function loadAudioEnabled() {
+    return readStoredBool(AUDIO_ENABLED_KEY) ?? true;
+  }
+
+  function setAudioToggleUi(enabled) {
+    const on = Boolean(enabled);
+    audioToggle.setAttribute("aria-pressed", on ? "true" : "false");
+    audioToggle.setAttribute("aria-label", on ? "关闭音效" : "开启音效");
+    if (audioIcon && audioIcon.textContent !== "♪") audioIcon.textContent = "♪";
+  }
+
+  function saveCurrentWheelNow() {
+    try {
+      const items = currentWheelItems();
+      localStorage.setItem(CURRENT_WHEEL_KEY, JSON.stringify({ items, updatedAt: Date.now() }));
+    } catch {
+      // ignore
+    }
+  }
+
+  function scheduleSaveCurrentWheel() {
+    if (saveCurrentWheelTimer) clearTimeout(saveCurrentWheelTimer);
+    saveCurrentWheelTimer = setTimeout(() => {
+      saveCurrentWheelTimer = 0;
+      saveCurrentWheelNow();
+    }, 220);
+  }
+
+  function loadCurrentWheel() {
+    try {
+      const raw = localStorage.getItem(CURRENT_WHEEL_KEY);
+      if (!raw) return false;
+      const parsed = JSON.parse(raw);
+      const items = Array.isArray(parsed?.items) ? parsed.items : Array.isArray(parsed) ? parsed : null;
+      if (!items) return false;
+      applyWheelItems(items);
+      return true;
+    } catch {
+      return false;
+    }
+  }
 
   function normalizeOptionText(text, idx) {
     const value = String(text ?? "").trim();
@@ -737,8 +693,9 @@
     options = nextOptions;
     weights = nextWeights.slice(0, nextOptions.length);
 
+    scheduleSaveCurrentWheel();
     renderOptionsList();
-    hideResult();
+    hideResult(false);
     scheduleLayout();
   }
 
@@ -844,15 +801,15 @@
       const stack = document.createElement("div");
       stack.className = "option-stack";
 
+      const initialText = normalizeOptionText(value, idx);
+
       const input = document.createElement("input");
       input.className = "option-input";
       input.value = value;
       input.type = "text";
       input.autocomplete = "off";
       input.spellcheck = false;
-      input.addEventListener("input", () => {
-        options[idx] = input.value;
-      });
+      input.setAttribute("aria-label", `选项 ${idx + 1}：${initialText}`);
 
       const weightRow = document.createElement("div");
       weightRow.className = "weight-row";
@@ -864,17 +821,8 @@
       range.max = "100";
       range.step = "1";
       range.value = String(Math.round(clamp(coerceWeight(weights[idx], 1), 0, 100)));
-      range.setAttribute("aria-label", `“${value}” 概率权重`);
+      range.setAttribute("aria-label", `“${initialText}” 概率权重`);
       setRangeFill(range);
-      range.addEventListener("input", () => {
-        weights[idx] = coerceWeight(range.value, 1);
-        if (totalWeight() <= 0) {
-          weights[idx] = 1;
-          range.value = "1";
-        }
-        setRangeFill(range);
-        refreshWeightPercents();
-      });
 
       const percent = document.createElement("div");
       percent.className = "weight-pill";
@@ -888,12 +836,35 @@
       del.className = "delete-btn";
       del.type = "button";
       del.title = "删除";
+      del.setAttribute("aria-label", `删除“${initialText}”`);
       del.textContent = "×";
+
+      input.addEventListener("input", () => {
+        options[idx] = input.value;
+        const nextText = normalizeOptionText(input.value, idx);
+        input.setAttribute("aria-label", `选项 ${idx + 1}：${nextText}`);
+        range.setAttribute("aria-label", `“${nextText}” 概率权重`);
+        del.setAttribute("aria-label", `删除“${nextText}”`);
+        scheduleSaveCurrentWheel();
+      });
+
+      range.addEventListener("input", () => {
+        weights[idx] = coerceWeight(range.value, 1);
+        if (totalWeight() <= 0) {
+          weights[idx] = 1;
+          range.value = "1";
+        }
+        setRangeFill(range);
+        refreshWeightPercents();
+        scheduleSaveCurrentWheel();
+      });
+
       del.addEventListener("click", () => {
         options.splice(idx, 1);
         weights.splice(idx, 1);
         if (options.length < 2) options.push("选项 2");
         if (weights.length < options.length) weights.push(1);
+        scheduleSaveCurrentWheel();
         renderOptionsList();
       });
 
@@ -965,7 +936,7 @@
       const end = start + span;
 
       const rgb = palette[i % palette.length];
-      const shade = 0.86 + 0.12 * Math.sin(idleT * 0.4 + i * 0.7);
+      const shade = 0.86 + 0.12 * Math.sin((reduceMotion ? 0 : idleT) * 0.4 + i * 0.7);
       const r = Math.round(rgb[0] * shade);
       const g = Math.round(rgb[1] * shade);
       const b = Math.round(rgb[2] * shade);
@@ -1103,8 +1074,7 @@
     if (spinning) return;
     if (options.length < 2) return;
 
-    hideResult();
-    startBgmIfNeeded();
+    hideResult(false);
     highlightIndex = null;
 
     const n = options.length;
@@ -1170,14 +1140,6 @@
       const remaining = duration - t;
       setSuspense(remaining <= suspenseSeconds);
 
-      if (suspense) {
-        const intervalMs = clamp(980 - (omega - omegaStop) * 120, 640, 980);
-        if (nowMs - lastHeartbeatMs >= intervalMs) {
-          lastHeartbeatMs = nowMs;
-          playHeartbeat();
-        }
-      }
-
       const idx = indexFromAngle(angle, options.length);
       if (idx !== lastIndex) {
         lastIndex = idx;
@@ -1193,15 +1155,15 @@
 
   function installHandlers() {
     spinFab.addEventListener("click", () => startSpin());
-    spinAgain.addEventListener("click", () => {
-      hideResult();
-      startSpin();
-    });
+    spinAgain.addEventListener("click", () => startSpin());
 
     addOptionBtn.addEventListener("click", () => {
       options.push(`选项 ${options.length + 1}`);
       weights.push(1);
+      scheduleSaveCurrentWheel();
       renderOptionsList();
+      const inputs = optionsListEl.querySelectorAll(".option-input");
+      inputs[inputs.length - 1]?.focus?.({ preventScroll: true });
     });
 
     openImportBtn.addEventListener("click", () => {
@@ -1269,7 +1231,7 @@
     });
 
     panelToggle.addEventListener("click", () => {
-      setPanelCollapsed(!panelCollapsed);
+      setPanelCollapsed(!panelCollapsed, true);
     });
 
     panelSizeRange?.addEventListener("input", () => {
@@ -1288,6 +1250,41 @@
       hideResult();
     });
 
+    document.addEventListener("keydown", (event) => {
+      if (!document.body.classList.contains("show-result")) return;
+
+      if (event.key === "Escape") {
+        event.preventDefault();
+        hideResult();
+        return;
+      }
+
+      if (event.key !== "Tab") return;
+
+      const focusables = resultFocusables();
+      if (!focusables.length) return;
+
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = document.activeElement;
+
+      if (!resultCard.contains(active)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first)?.focus?.({ preventScroll: true });
+        return;
+      }
+
+      if (event.shiftKey) {
+        if (active === first || active === resultCard) {
+          event.preventDefault();
+          last?.focus?.({ preventScroll: true });
+        }
+      } else if (active === last) {
+        event.preventDefault();
+        first?.focus?.({ preventScroll: true });
+      }
+    });
+
     usePresetBtn.addEventListener("click", () => {
       const key = presetSelect.value;
       if (!key || !presets[key]) return;
@@ -1295,24 +1292,26 @@
     });
 
     audioToggle.addEventListener("click", () => {
-      const next = !audioEnabled;
-      audioToggle.setAttribute("aria-pressed", next ? "true" : "false");
-      if (!next) {
-        stopBgm(0.12);
-        audioEnabled = false;
-        return;
-      }
-      audioEnabled = true;
-      startBgmIfNeeded();
+      audioEnabled = !audioEnabled;
+      setAudioToggleUi(audioEnabled);
+      writeStoredBool(AUDIO_ENABLED_KEY, audioEnabled);
     });
 
     window.addEventListener("resize", () => scheduleLayout(), { passive: true });
   }
 
-  renderOptionsList();
+  audioEnabled = loadAudioEnabled();
+  setAudioToggleUi(audioEnabled);
+
+  const restored = loadCurrentWheel();
+  if (!restored) renderOptionsList();
+
   installHandlers();
   loadPanelSizeVh();
-  setPanelCollapsed(window.matchMedia?.("(max-height: 780px)")?.matches ?? false);
+
+  const storedCollapsed = readStoredBool(PANEL_COLLAPSED_KEY);
+  const autoCollapsed = window.matchMedia?.("(max-height: 780px)")?.matches ?? false;
+  setPanelCollapsed(storedCollapsed ?? autoCollapsed);
   scheduleLayout();
   requestAnimationFrame(frame);
 })();

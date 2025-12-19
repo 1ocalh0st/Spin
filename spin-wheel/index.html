@@ -4,8 +4,10 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#0b0b14" />
-    <title>决策转盘</title>
+    <meta name="description" content="一个零依赖的 Web/PWA 转盘：支持自定义概率、悬念停顿、震动/音效反馈与转盘库保存。" />
+    <title>转盘</title>
     <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" href="icon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
@@ -16,14 +18,14 @@
         <div class="brand">
           <div class="logo" aria-hidden="true"></div>
           <div class="titles">
-            <div class="title">决策转盘</div>
+            <div class="title">转盘</div>
             <div class="subtitle">转一下吧！</div>
           </div>
         </div>
 
         <div class="top-actions">
-          <button id="audioToggle" class="icon-btn" type="button" aria-pressed="true" title="音乐">
-            <span class="icon" aria-hidden="true">♪</span>
+          <button id="audioToggle" class="icon-btn" type="button" aria-pressed="true" aria-label="关闭音效" title="音效">
+            <span id="audioIcon" class="icon" aria-hidden="true">♪</span>
           </button>
         </div>
       </header>
@@ -31,7 +33,7 @@
       <main class="stage">
         <div id="wheelStage" class="wheel-stage" aria-label="转盘">
           <div class="wheel-tilt">
-            <canvas id="wheelCanvas"></canvas>
+            <canvas id="wheelCanvas" aria-hidden="true"></canvas>
           </div>
 
           <div class="pointer" aria-hidden="true">
@@ -47,10 +49,19 @@
 
           <div id="resultBackdrop" class="result-backdrop" hidden></div>
 
-          <div id="resultCard" class="result-card glass" hidden>
+          <div
+            id="resultCard"
+            class="result-card glass"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="resultLabel"
+            aria-describedby="resultText"
+            tabindex="-1"
+            hidden
+          >
             <button id="resultClose" class="icon-btn ghost" type="button" aria-label="关闭结果">×</button>
-            <div class="result-label">结果</div>
-            <div id="resultText" class="result-text"></div>
+            <div id="resultLabel" class="result-label">结果</div>
+            <div id="resultText" class="result-text" aria-live="polite"></div>
             <button id="spinAgain" class="secondary-btn" type="button">再转一次</button>
           </div>
         </div>
@@ -64,39 +75,41 @@
         <div class="panel-head">
           <div class="panel-title">选项</div>
           <div class="panel-actions">
-            <button id="panelToggle" class="secondary-btn" type="button">收起</button>
             <button id="openWheels" class="secondary-btn" type="button">转盘</button>
             <button id="openImport" class="secondary-btn" type="button">导入</button>
             <button id="addOption" class="secondary-btn" type="button">添加</button>
+            <button id="panelToggle" class="secondary-btn" type="button" aria-controls="panelBody" aria-expanded="true">收起</button>
           </div>
         </div>
 
-        <div id="panelSizeRow" class="panel-size-row">
-          <div class="panel-size-label">面板高度</div>
-          <input
-            id="panelSizeRange"
-            class="panel-size-range"
-            type="range"
-            min="28"
-            max="70"
-            step="1"
-            value="46"
-            aria-label="面板高度"
-          />
-          <div id="panelSizeValue" class="panel-size-value">46vh</div>
-          <button id="panelSizeReset" class="secondary-btn" type="button">重置</button>
-        </div>
+        <div id="panelBody" class="panel-body">
+          <div id="panelSizeRow" class="panel-size-row">
+            <div class="panel-size-label">面板高度</div>
+            <input
+              id="panelSizeRange"
+              class="panel-size-range"
+              type="range"
+              min="28"
+              max="70"
+              step="1"
+              value="46"
+              aria-label="面板高度"
+            />
+            <div id="panelSizeValue" class="panel-size-value">46vh</div>
+            <button id="panelSizeReset" class="secondary-btn" type="button">重置</button>
+          </div>
 
-        <div id="optionsList" class="options"></div>
+          <div id="optionsList" class="options"></div>
 
-        <div class="preset-row">
-          <select id="presetSelect" class="preset-select" aria-label="预设">
-            <option value="">预设…</option>
-            <option value="couple_movies">帮我生成一组适合情侣看的电影</option>
-            <option value="dinner_ideas">给我10个今天晚餐的选择</option>
-            <option value="date_ideas">帮我想一些周末约会点子</option>
-          </select>
-          <button id="usePreset" class="secondary-btn" type="button">生成</button>
+          <div class="preset-row">
+            <select id="presetSelect" class="preset-select" aria-label="预设">
+              <option value="">预设…</option>
+              <option value="couple_movies">帮我生成一组适合情侣看的电影</option>
+              <option value="dinner_ideas">给我10个今天晚餐的选择</option>
+              <option value="date_ideas">帮我想一些周末约会点子</option>
+            </select>
+            <button id="usePreset" class="secondary-btn" type="button">生成</button>
+          </div>
         </div>
       </section>
     </div>
@@ -105,6 +118,7 @@
       <form method="dialog" class="import-form">
         <div class="import-title">快速输入</div>
         <div class="import-hint">按换行 / 逗号 / ，分割</div>
+        <label for="importText" class="sr-only">输入选项列表</label>
         <textarea
           id="importText"
           class="import-text"
@@ -126,11 +140,13 @@
         <div class="import-hint">保存/载入带概率的转盘配置（仅存本机浏览器）</div>
 
         <div class="wheel-name-row">
+          <label for="wheelName" class="sr-only">转盘名称</label>
           <input id="wheelName" class="wheel-name" type="text" maxlength="40" placeholder="转盘名称，例如：今晚吃什么" />
           <button id="saveWheel" class="primary-btn" type="button">保存</button>
         </div>
 
         <div class="wheel-list-row">
+          <label for="wheelSelect" class="sr-only">已保存转盘</label>
           <select id="wheelSelect" class="preset-select" aria-label="已保存转盘">
             <option value="">已保存的转盘…</option>
           </select>
@@ -150,6 +166,83 @@
       </form>
     </dialog>
 
+    <div id="musicWidget" class="music-widget" aria-label="音乐播放器">
+      <button
+        id="musicFab"
+        class="music-fab"
+        type="button"
+        aria-label="打开音乐播放器"
+        aria-controls="musicPanel"
+        aria-expanded="false"
+      >
+        <img id="musicFabCover" class="music-fab-cover" alt="" decoding="async" loading="lazy" />
+        <span id="musicFabIcon" class="music-fab-icon" aria-hidden="true">♪</span>
+      </button>
+
+      <div id="musicBackdrop" class="music-backdrop" hidden></div>
+
+      <section id="musicPanel" class="music-panel glass" role="dialog" aria-modal="true" aria-labelledby="musicPanelTitle" hidden>
+        <header class="music-head">
+          <div id="musicPanelTitle" class="music-head-title">音乐</div>
+          <div class="music-head-actions">
+            <button id="musicOpenSettings" class="icon-btn" type="button" aria-label="设置">⚙</button>
+            <button id="musicClose" class="icon-btn ghost" type="button" aria-label="关闭音乐面板">×</button>
+          </div>
+        </header>
+
+        <div class="music-now">
+          <img id="musicCover" class="music-cover" alt="" decoding="async" loading="lazy" />
+          <div class="music-now-meta">
+            <div id="musicTrack" class="music-track" title="—">—</div>
+            <div id="musicArtist" class="music-artist" title="—">—</div>
+          </div>
+        </div>
+
+        <div class="music-controls">
+          <button id="musicPrev" class="icon-btn" type="button" aria-label="上一首">⟨</button>
+          <button id="musicPlay" class="icon-btn" type="button" aria-label="播放" aria-pressed="false">▶</button>
+          <button id="musicNext" class="icon-btn" type="button" aria-label="下一首">⟩</button>
+          <button id="musicMute" class="icon-btn ghost" type="button" aria-label="静音" aria-pressed="false">🔈</button>
+        </div>
+
+        <div class="music-progress">
+          <div id="musicTime" class="music-time">0:00</div>
+          <input id="musicSeek" class="music-seek" type="range" min="0" max="1000" step="1" value="0" aria-label="播放进度" />
+          <div id="musicDuration" class="music-time">0:00</div>
+        </div>
+
+        <div id="musicSettings" class="music-settings" hidden>
+          <div class="music-settings-row">
+            <label for="musicUid" class="music-label">网易云 UID</label>
+            <input id="musicUid" class="music-input" type="text" inputmode="numeric" autocomplete="off" />
+            <button id="musicReload" class="secondary-btn" type="button">载入</button>
+          </div>
+          <div class="music-settings-row">
+            <label for="musicPlaylist" class="music-label">歌单</label>
+            <select id="musicPlaylist" class="preset-select" aria-label="歌单"></select>
+            <button id="musicOpenPlaylist" class="secondary-btn" type="button">打开</button>
+          </div>
+          <div class="music-settings-row">
+            <label for="musicVolume" class="music-label">音量</label>
+            <input id="musicVolume" class="music-seek" type="range" min="0" max="100" step="1" value="80" aria-label="音量" />
+            <button id="musicVolumeReset" class="secondary-btn" type="button">默认</button>
+          </div>
+        </div>
+
+        <div class="music-list-head">
+          <div class="music-list-title">曲目</div>
+          <div class="music-list-right">
+            <input id="musicSearch" class="music-search" type="search" placeholder="搜索…" autocomplete="off" />
+          </div>
+        </div>
+
+        <div id="musicList" class="music-list" role="list"></div>
+
+        <div id="musicToast" class="music-toast" aria-live="polite"></div>
+      </section>
+    </div>
+
     <script src="app.js"></script>
+    <script src="music.js"></script>
   </body>
 </html>

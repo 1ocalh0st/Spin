@@ -1,5 +1,13 @@
-const CACHE_NAME = "wheel-cache-v8";
-const ASSETS = ["./", "./index.html", "./styles.css", "./app.js", "./manifest.webmanifest", "./icon.svg"];
+const CACHE_NAME = "wheel-cache-v10";
+const ASSETS = [
+  "./",
+  "./index.html",
+  "./styles.css",
+  "./app.js",
+  "./music.js",
+  "./manifest.webmanifest",
+  "./icon.svg",
+];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -24,6 +32,7 @@ self.addEventListener("fetch", (event) => {
   if (request.method !== "GET") return;
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
+  if (url.pathname.startsWith("/api/")) return;
 
   event.respondWith(
     caches.open(CACHE_NAME).then(async (cache) => {
