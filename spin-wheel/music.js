@@ -826,7 +826,7 @@
     const { url } = urlEntry || {};
     track.playable = Boolean(url);
     if (!url) {
-      setToast("该曲目暂无可播放地址（可能需要 VIP / 版权限制）。", "error");
+      setToast("该曲目暂无可播放地址（可能需要 VIP / 版权限制）。[服务器在国外，很多听不了。。求赞助]", "error");
       renderTrackList();
       updatePlayUi(false);
       return;
