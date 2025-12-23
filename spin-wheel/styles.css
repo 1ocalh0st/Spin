@@ -11,9 +11,10 @@
   --mint: #5eead4;
   --peach: #fdba74;
   --ease: cubic-bezier(0.2, 0.9, 0.2, 1);
-  --panel-vh: 46vh;
-  --panel-min: 300px;
+  --panel-vh: var(--panel-max);
+  --panel-min: 74px;
   --panel-max: 540px;
+  --panel-collapsed: 74px;
 }
 
 * {
@@ -45,6 +46,10 @@ body {
   overflow: hidden;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 .bg {
   position: fixed;
   inset: -10%;
@@ -72,8 +77,7 @@ body {
   height: 100%;
   max-width: 720px;
   margin: 0 auto;
-  padding: calc(14px + env(safe-area-inset-top)) calc(14px + env(safe-area-inset-right))
-    calc(18px + env(safe-area-inset-bottom)) calc(14px + env(safe-area-inset-left));
+  padding: calc(14px + env(safe-area-inset-top)) calc(14px + env(safe-area-inset-right)) calc(18px + env(safe-area-inset-bottom)) calc(14px + env(safe-area-inset-left));
   display: grid;
   grid-template-rows: auto 1fr auto;
   gap: 14px;
@@ -314,6 +318,21 @@ canvas {
   letter-spacing: 0.2px;
 }
 
+.result-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.result-actions .primary-btn,
+.result-actions .secondary-btn {
+  width: 100%;
+  padding: 12px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
 .panel {
   width: min(640px, 100%);
   justify-self: center;
@@ -335,21 +354,44 @@ canvas {
   pointer-events: none;
 }
 
-.panel::before {
-  content: "";
+.panel-drag-handle {
+  display: none;
   position: absolute;
   top: 10px;
   left: 50%;
   transform: translateX(-50%);
-  width: 44px;
-  height: 4px;
+  width: 56px;
+  height: 6px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.18);
+  touch-action: none;
+  cursor: ns-resize;
+}
+
+.panel-drag-handle:active {
+  background: rgba(255, 255, 255, 0.28);
 }
 
 .panel.collapsed {
-  max-height: 74px;
+  --panel-vh: var(--panel-collapsed);
   padding: 18px 14px 14px;
+}
+
+.panel.collapsed .panel-body {
+  display: none;
+}
+
+.panel.collapsed .panel-title,
+.panel.collapsed .panel-actions button:not(#panelToggle) {
+  display: none;
+}
+
+.panel.collapsed .panel-head {
+  justify-content: flex-end;
+}
+
+.panel.collapsed .panel-drag-handle {
+  display: none;
 }
 
 .panel-head {
@@ -357,6 +399,7 @@ canvas {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  position: relative;
 }
 
 .panel-title {
@@ -369,11 +412,54 @@ canvas {
   flex-wrap: nowrap;
 }
 
+.panel-more-btn {
+  display: none;
+  width: 40px;
+  padding-left: 0;
+  padding-right: 0;
+  font-weight: 800;
+  letter-spacing: 1px;
+  line-height: 1;
+}
+
 .panel-actions .secondary-btn {
   padding: 8px 10px;
   border-radius: 14px;
   font-size: 12px;
   white-space: nowrap;
+}
+
+@media (max-width: 520px) {
+  :root {
+    --panel-min: 28svh;
+    --panel-max: 70svh;
+  }
+
+
+  .panel-actions #openWheels,
+  .panel-actions #openImport,
+  .panel-actions #exportJson,
+  .panel-actions #importJsonBtn {
+    display: none;
+  }
+
+  .panel-more-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .panel-actions {
+    gap: 6px;
+  }
+
+  .panel-size-row#panelSizeRow {
+    display: none;
+  }
+
+  .panel-drag-handle {
+    display: block;
+  }
 }
 
 .panel-body {
@@ -409,14 +495,6 @@ canvas {
   border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.14);
   background: rgba(0, 0, 0, 0.12);
-}
-
-.panel.collapsed .panel-body {
-  display: none;
-}
-
-.panel.collapsed .panel-actions button:not(#panelToggle) {
-  display: none;
 }
 
 #panelToggle {
@@ -547,8 +625,7 @@ canvas {
   height: 10px;
   border-radius: 999px;
   background:
-    linear-gradient(90deg, rgba(167, 139, 250, 0.72), rgba(94, 234, 212, 0.52), rgba(253, 186, 116, 0.40)) 0 0 /
-      var(--p, 50%) 100% no-repeat,
+    linear-gradient(90deg, rgba(167, 139, 250, 0.72), rgba(94, 234, 212, 0.52), rgba(253, 186, 116, 0.40)) 0 0 / var(--p, 50%) 100% no-repeat,
     rgba(255, 255, 255, 0.10);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12), inset 0 10px 16px rgba(0, 0, 0, 0.18);
 }
@@ -693,10 +770,23 @@ canvas {
 }
 
 dialog.import-dialog {
+  display: none;
   border: none;
   padding: 0;
   border-radius: 22px;
   width: min(92vw, 420px);
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  z-index: 50;
+  max-height: calc(100vh - 28px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  max-height: calc(100svh - 28px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  max-height: calc(100dvh - 28px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  overflow: auto;
+}
+
+dialog.import-dialog[open] {
+  display: block;
 }
 
 dialog::backdrop {
@@ -708,6 +798,16 @@ dialog::backdrop {
   padding: 14px 14px 12px;
   display: grid;
   gap: 10px;
+}
+
+.panel-actions-dialog {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.panel-actions-dialog .secondary-btn {
+  width: 100%;
 }
 
 .import-title {
@@ -847,6 +947,8 @@ body.is-tick .pointer-icon {
   --music-a: rgba(167, 139, 250, 0.92);
   --music-b: rgba(94, 234, 212, 0.82);
   --music-c: rgba(253, 186, 116, 0.70);
+  transform: translate(var(--music-fab-x, 0px), var(--music-fab-y, 0px));
+  will-change: transform;
 }
 
 .music-fab {
@@ -864,6 +966,7 @@ body.is-tick .pointer-icon {
   place-items: center;
   transform: translateY(var(--music-fab-ty)) scale(var(--music-fab-scale));
   transition: transform 160ms var(--ease), filter 160ms var(--ease);
+  touch-action: none;
 }
 
 .music-fab:hover {
@@ -995,11 +1098,16 @@ body.music-open .music-panel {
 .music-head-title {
   font-weight: 700;
   letter-spacing: 0.2px;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .music-head-actions {
   display: flex;
   gap: 8px;
+  flex-shrink: 0;
 }
 
 .music-now {
@@ -1089,6 +1197,10 @@ body.music-open .music-panel {
   align-items: center;
 }
 
+.music-settings-row > * {
+  min-width: 0;
+}
+
 .music-label {
   font-size: 12px;
   color: var(--muted);
@@ -1097,12 +1209,21 @@ body.music-open .music-panel {
 
 .music-input {
   width: 100%;
+  min-width: 0;
   padding: 10px 12px;
   border-radius: 16px;
   border: 1px solid rgba(255, 255, 255, 0.18);
   background: rgba(0, 0, 0, 0.18);
   color: var(--text);
   outline: none;
+}
+
+.music-settings-row .preset-select {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .music-list-head {
@@ -1114,6 +1235,13 @@ body.music-open .music-panel {
   gap: 10px;
 }
 
+.music-list-right {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  justify-content: flex-end;
+}
+
 .music-list-title {
   font-size: 12px;
   color: var(--muted);
@@ -1121,6 +1249,7 @@ body.music-open .music-panel {
 
 .music-search {
   width: min(50vw, 220px);
+  min-width: 0;
   padding: 8px 10px;
   border-radius: 14px;
   border: 1px solid rgba(255, 255, 255, 0.18);
@@ -1190,6 +1319,30 @@ body.music-open .music-panel {
   }
 }
 
+@media (min-width: 521px) {
+  .panel-size-row#panelSizeRow {
+    display: none;
+  }
+}
+
+@media (max-width: 520px) {
+  .music-panel {
+    left: calc(10px + env(safe-area-inset-left));
+    right: calc(10px + env(safe-area-inset-right));
+    top: calc(10px + env(safe-area-inset-top));
+    bottom: auto;
+    width: auto;
+    height: calc(100svh - 20px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    max-height: calc(100svh - 20px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    height: calc(100dvh - 20px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    max-height: calc(100dvh - 20px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  }
+
+  .music-list {
+    min-height: 0;
+  }
+}
+
 .music-item:hover {
   transform: translateY(-1px);
   background: rgba(0, 0, 0, 0.18);
@@ -1254,6 +1407,7 @@ body.music-open .music-panel {
   from {
     transform: translateY(var(--music-fab-ty)) scale(var(--music-fab-scale)) rotate(0deg);
   }
+
   to {
     transform: translateY(var(--music-fab-ty)) scale(var(--music-fab-scale)) rotate(360deg);
   }
@@ -1267,6 +1421,7 @@ body.music-open .music-panel {
 }
 
 @media (prefers-reduced-motion: reduce) {
+
   *,
   *::before,
   *::after {

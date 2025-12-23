@@ -1,4 +1,4 @@
-const CACHE_NAME = "wheel-cache-v10";
+const CACHE_NAME = "wheel-cache-v11";
 const ASSETS = [
   "./",
   "./index.html",
@@ -38,21 +38,42 @@ self.addEventListener("fetch", (event) => {
     caches.open(CACHE_NAME).then(async (cache) => {
       const cached = await cache.match(request);
 
-      const fetchPromise = fetch(request)
-        .then((resp) => {
-          if (resp && resp.ok) cache.put(request, resp.clone());
-          return resp;
-        })
-        .catch(() => null);
+      const isStaticCritical =
+        request.mode === "navigate" ||
+        request.destination === "document" ||
+        request.destination === "script" ||
+        request.destination === "style" ||
+        request.destination === "manifest" ||
+        url.pathname === "/" ||
+        url.pathname.endsWith(".js") ||
+        url.pathname.endsWith(".css") ||
+        url.pathname.endsWith(".webmanifest");
 
+      const fetchPromise = fetch(request).then((resp) => {
+        if (resp && resp.ok) cache.put(request, resp.clone());
+        return resp;
+      });
+
+      if (isStaticCritical) {
+        try {
+          return await fetchPromise;
+        } catch {
+          if (cached) return cached;
+          return new Response("离线", { status: 503, headers: { "Content-Type": "text/plain; charset=utf-8" } });
+        }
+      }
+
+      const revalidate = fetchPromise.catch(() => null);
       if (cached) {
-        event.waitUntil(fetchPromise);
+        event.waitUntil(revalidate);
         return cached;
       }
 
-      const resp = await fetchPromise;
-      if (resp) return resp;
-      return new Response("离线", { status: 503, headers: { "Content-Type": "text/plain; charset=utf-8" } });
+      try {
+        return await fetchPromise;
+      } catch {
+        return new Response("离线", { status: 503, headers: { "Content-Type": "text/plain; charset=utf-8" } });
+      }
     }),
   );
 });

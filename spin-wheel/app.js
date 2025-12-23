@@ -16,6 +16,7 @@
   const resultText = document.getElementById("resultText");
   const resultClose = document.getElementById("resultClose");
   const spinFab = document.getElementById("spinFab");
+  const confirmResult = document.getElementById("confirmResult");
   const spinAgain = document.getElementById("spinAgain");
   const audioToggle = document.getElementById("audioToggle");
   const audioIcon = document.getElementById("audioIcon");
@@ -23,15 +24,23 @@
   const optionsListEl = document.getElementById("optionsList");
   const addOptionBtn = document.getElementById("addOption");
   const openImportBtn = document.getElementById("openImport");
+  const exportJsonBtn = document.getElementById("exportJson");
+  const importJsonBtn = document.getElementById("importJsonBtn");
+  const importJsonInput = document.getElementById("importJsonInput");
   const importDialog = document.getElementById("importDialog");
   const importTextEl = document.getElementById("importText");
   const pasteClipboardBtn = document.getElementById("pasteClipboard");
   const panelEl = document.querySelector(".panel");
   const panelToggle = document.getElementById("panelToggle");
+  const panelActionsMore = document.getElementById("panelActionsMore");
+  const panelActionsDialog = document.getElementById("panelActionsDialog");
   const panelSizeRow = document.getElementById("panelSizeRow");
   const panelSizeRange = document.getElementById("panelSizeRange");
   const panelSizeValue = document.getElementById("panelSizeValue");
   const panelSizeReset = document.getElementById("panelSizeReset");
+  const soundModeSelect = document.getElementById("soundModeSelect");
+  const panelDragHandle = document.getElementById("panelDragHandle");
+  const avgWeightsBtn = document.getElementById("avgWeights");
 
   const presetSelect = document.getElementById("presetSelect");
   const usePresetBtn = document.getElementById("usePreset");
@@ -110,6 +119,8 @@
   ];
   let weights = options.map(() => 1);
 
+  let lastWeightFocus = 0;
+
   let angle = 0;
   let spinning = false;
   let suspense = false;
@@ -139,17 +150,32 @@
   }
 
   let audioEnabled = true;
+  let soundMode = "default";
   let audioCtx = null;
   let masterGain = null;
+  let noiseBuffer = null;
   let panelCollapsed = false;
   let restoreFocusEl = null;
   let saveCurrentWheelTimer = 0;
 
   if ("serviceWorker" in navigator) {
+    const wasControlled = Boolean(navigator.serviceWorker.controller);
+    let swReloading = false;
+
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (!wasControlled) return;
+      if (swReloading) return;
+      swReloading = true;
+      window.location.reload();
+    });
+
     window.addEventListener(
       "load",
       () => {
-        navigator.serviceWorker.register("./sw.js").catch(() => {});
+        navigator.serviceWorker
+          .register("./sw.js")
+          .then((reg) => reg.update().catch(() => { }))
+          .catch(() => { });
       },
       { once: true },
     );
@@ -165,7 +191,141 @@
     return Math.max(0, num);
   }
 
-  function syncWeights() {
+  function distributeIntegersEvenly(total, count) {
+    const sum = Math.max(0, Math.floor(Number(total) || 0));
+    const n = Math.max(0, Math.floor(Number(count) || 0));
+    if (n <= 0) return [];
+    const base = Math.floor(sum / n);
+    const extra = sum - base * n;
+    const out = new Array(n).fill(base);
+    for (let i = 0; i < extra; i += 1) out[i] += 1;
+    return out;
+  }
+
+
+  function circularDistance(a, b, n) {
+    const d = Math.abs(a - b);
+    return Math.min(d, n - d);
+  }
+
+  // Preferred balancing order when distributing rounding / empty-weight cases:
+  // adjust the *previous* items first, which feels more natural when dragging sliders.
+  function balanceOrderAll(n, anchor) {
+    const out = [];
+    const a = modPositive(Number(anchor) || 0, n);
+    for (let step = 0; step < n; step += 1) out.push(modPositive(a - step, n));
+    return out;
+  }
+
+  function balanceOrder(n, anchor) {
+    const out = [];
+    const a = modPositive(Number(anchor) || 0, n);
+    for (let step = 1; step < n; step += 1) out.push(modPositive(a - step, n));
+    return out;
+  }
+
+  function normalizeWeightsTo100(anchorIndex = lastWeightFocus) {
+  const n = options.length;
+  if (n <= 0) {
+    weights = [];
+    return;
+  }
+
+  const anchor = clamp(Math.floor(Number(anchorIndex) || 0), 0, n - 1);
+  lastWeightFocus = anchor;
+
+  const sanitized = new Array(n);
+  let sum = 0;
+  let allInts = true;
+
+  for (let i = 0; i < n; i += 1) {
+    const v = coerceWeight(weights[i], 0);
+    sanitized[i] = v;
+    sum += v;
+    if (!Number.isInteger(v)) allInts = false;
+  }
+
+  // Fast path: already a valid 0..100 integer distribution.
+  if (sum === 100 && allInts && sanitized.every((v) => v >= 0 && v <= 100)) {
+    weights = sanitized;
+    return;
+  }
+
+  // If everything is 0 / invalid, fall back to an even distribution,
+  // but avoid always biasing toward the first items.
+  if (!(sum > 0)) {
+    const base = Math.floor(100 / n);
+    let extra = 100 - base * n;
+    const out = new Array(n).fill(base);
+
+    const order = balanceOrderAll(n, anchor);
+    for (let k = 0; k < order.length && extra > 0; k += 1) {
+      out[order[k]] += 1;
+      extra -= 1;
+    }
+
+    weights = out;
+    return;
+  }
+
+  // Largest-remainder rounding with stable tie-breaks.
+  const floors = new Array(n);
+  const remainders = new Array(n);
+  let floorSum = 0;
+
+  for (let i = 0; i < n; i += 1) {
+    const raw = (sanitized[i] / sum) * 100;
+    const floored = Math.floor(raw);
+    floors[i] = floored;
+    remainders[i] = raw - floored;
+    floorSum += floored;
+  }
+
+  const out = floors.slice();
+  let diff = 100 - floorSum;
+
+  if (diff > 0) {
+    const order = Array.from({ length: n }, (_, i) => i).sort((a, b) => {
+      const d = remainders[b] - remainders[a];
+      if (d !== 0) return d;
+      const w = sanitized[b] - sanitized[a];
+      if (w !== 0) return w > 0 ? -1 : 1; // bigger weight first
+      const da = circularDistance(a, anchor, n);
+      const db = circularDistance(b, anchor, n);
+      if (da !== db) return da - db;
+      return a - b;
+    });
+
+    for (let k = 0; k < order.length && diff > 0; k += 1) {
+      out[order[k]] += 1;
+      diff -= 1;
+    }
+  } else if (diff < 0) {
+    // Very rare (floating edge cases): remove from the smallest fractions first.
+    let remove = -diff;
+    const order = Array.from({ length: n }, (_, i) => i).sort((a, b) => {
+      const d = remainders[a] - remainders[b];
+      if (d !== 0) return d;
+      const w = sanitized[a] - sanitized[b];
+      if (w !== 0) return w < 0 ? -1 : 1; // smaller weight first
+      const da = circularDistance(a, anchor, n);
+      const db = circularDistance(b, anchor, n);
+      if (da !== db) return da - db;
+      return a - b;
+    });
+
+    for (let k = 0; k < order.length && remove > 0; k += 1) {
+      const i = order[k];
+      if (out[i] <= 0) continue;
+      out[i] -= 1;
+      remove -= 1;
+    }
+  }
+
+  weights = out.map((v) => clamp(v, 0, 100));
+}
+
+  function syncWeightsLength() {
     if (!Array.isArray(weights)) weights = [];
     if (weights.length < options.length) {
       weights = weights.concat(new Array(options.length - weights.length).fill(1));
@@ -173,6 +333,107 @@
       weights = weights.slice(0, options.length);
     }
     weights = weights.map((w) => coerceWeight(w, 1));
+  }
+
+  function syncWeights() {
+    syncWeightsLength();
+    normalizeWeightsTo100(lastWeightFocus);
+  }
+
+  function setWeightPercent(index, nextPercent) {
+  syncWeightsLength();
+  const n = options.length;
+  if (n <= 0) return;
+
+  const idx = clamp(Math.floor(Number(index)), 0, n - 1);
+  lastWeightFocus = idx;
+  const target = clamp(Math.round(Number(nextPercent)), 0, 100);
+
+  if (n === 1) {
+    weights[0] = 100;
+    return;
+  }
+
+  const out = new Array(n).fill(0);
+  out[idx] = target;
+
+  const remaining = 100 - target;
+  if (!(remaining > 0)) {
+    weights = out;
+    return;
+  }
+
+  const others = [];
+  let otherSum = 0;
+  for (let i = 0; i < n; i += 1) {
+    if (i === idx) continue;
+    const w = coerceWeight(weights[i], 0);
+    others.push({ i, w });
+    otherSum += w;
+  }
+
+  // If other weights are all zero, distribute in a stable "nearby-first" order.
+  if (!(otherSum > 0)) {
+    const order = balanceOrder(n, idx); // excludes idx
+    const base = Math.floor(remaining / (n - 1));
+    let extra = remaining - base * (n - 1);
+
+    for (const i of order) out[i] = base;
+    for (let k = 0; k < order.length && extra > 0; k += 1) {
+      out[order[k]] += 1;
+      extra -= 1;
+    }
+
+    weights = out;
+    return;
+  }
+
+  // Proportional re-balance, then largest-remainder rounding with stable tie-breaks.
+  const remainders = [];
+  let floorSum = 0;
+
+  for (const { i, w } of others) {
+    const raw = (w / otherSum) * remaining;
+    const floored = Math.floor(raw);
+    out[i] = floored;
+    floorSum += floored;
+    remainders.push({ i, r: raw - floored, prev: w });
+  }
+
+  let leftover = remaining - floorSum;
+  remainders.sort((a, b) => {
+    const d = b.r - a.r;
+    if (d !== 0) return d;
+    const w = b.prev - a.prev;
+    if (w !== 0) return w > 0 ? -1 : 1; // bigger previous weight first
+    const da = circularDistance(a.i, idx, n);
+    const db = circularDistance(b.i, idx, n);
+    if (da !== db) return da - db;
+    return a.i - b.i;
+  });
+
+  for (let k = 0; k < remainders.length && leftover > 0; k += 1) {
+    out[remainders[k].i] += 1;
+    leftover -= 1;
+  }
+
+  // Safety: if floating errors keep leftover > 0, cycle in the same stable order.
+  if (leftover > 0 && remainders.length) {
+    for (let k = 0; leftover > 0; k = (k + 1) % remainders.length) {
+      out[remainders[k].i] += 1;
+      leftover -= 1;
+    }
+  }
+
+    weights = out;
+  }
+
+  function averageWeights() {
+    syncWeightsLength();
+    weights = distributeIntegersEvenly(100, options.length);
+    refreshWeightPercents();
+    scheduleSaveCurrentWheel();
+    scheduleLayout();
   }
 
   function totalWeight() {
@@ -190,44 +451,58 @@
     rangeEl.style.setProperty("--p", `${p}%`);
   }
 
-  function applyPanelSizeVh(vh) {
-    const value = clamp(Math.round(Number(vh)), 28, 70);
-    document.documentElement.style.setProperty("--panel-vh", `${value}vh`);
+  const PANEL_MIN_VH = 28;
+  const PANEL_MAX_VH = 70;
+
+  function isMobilePanel() {
+    return window.matchMedia?.("(max-width: 520px)")?.matches ?? false;
+  }
+
+  function applyPanelSizeVh(vh, { persist = false } = {}) {
+    const value = clamp(Math.round(Number(vh)), PANEL_MIN_VH, PANEL_MAX_VH);
+    document.documentElement.style.setProperty("--panel-vh", `${value}svh`);
     if (panelSizeValue) panelSizeValue.textContent = `${value}vh`;
     if (panelSizeRange) {
       panelSizeRange.value = String(value);
       setRangeFill(panelSizeRange);
     }
-    try {
-      localStorage.setItem(PANEL_SIZE_KEY, String(value));
-    } catch {
-      // ignore
+    if (persist) {
+      try {
+        localStorage.setItem(PANEL_SIZE_KEY, String(value));
+      } catch {
+        // ignore
+      }
     }
     scheduleLayout();
   }
 
-  function loadPanelSizeVh() {
-    try {
-      const raw = localStorage.getItem(PANEL_SIZE_KEY);
-      const value = Number(raw);
-      if (Number.isFinite(value)) applyPanelSizeVh(value);
-      else applyPanelSizeVh(46);
-    } catch {
-      applyPanelSizeVh(46);
-    }
+  function applyPanelMax() {
+    if (isMobilePanel()) applyPanelSizeVh(PANEL_MAX_VH);
+    else document.documentElement.style.setProperty("--panel-vh", "var(--panel-max)");
+    scheduleLayout();
+  }
+
+  function applyPanelMin() {
+    if (isMobilePanel()) applyPanelSizeVh(PANEL_MIN_VH);
+    else document.documentElement.style.setProperty("--panel-vh", "var(--panel-min)");
+    scheduleLayout();
   }
 
   function refreshWeightPercents() {
     syncWeights();
-    const sum = totalWeight();
-    const n = options.length;
+    const ranges = optionsListEl.querySelectorAll("[data-weight-range]");
+    ranges.forEach((rangeEl) => {
+      const idx = Number(rangeEl.getAttribute("data-index") ?? 0);
+      const value = clamp(coerceWeight(weights[idx], 0), 0, 100);
+      rangeEl.value = String(Math.round(value));
+      setRangeFill(rangeEl);
+    });
 
     const els = optionsListEl.querySelectorAll("[data-weight-percent]");
     els.forEach((el) => {
       const idx = Number(el.getAttribute("data-index") ?? 0);
-      const w = coerceWeight(weights[idx], 0);
-      const pct = sum > 0 ? (w / sum) * 100 : n > 0 ? 100 / n : 0;
-      el.textContent = `${Math.round(pct)}%`;
+      const value = clamp(coerceWeight(weights[idx], 0), 0, 100);
+      el.textContent = `${Math.round(value)}%`;
     });
   }
 
@@ -274,7 +549,46 @@
     panelToggle.textContent = panelCollapsed ? "展开" : "收起";
     panelToggle.setAttribute("aria-expanded", panelCollapsed ? "false" : "true");
     if (persist) writeStoredBool(PANEL_COLLAPSED_KEY, panelCollapsed);
+    closePanelActionsDialog(false);
+    if (panelCollapsed) applyPanelMin();
+    else applyPanelMax();
     scheduleLayout();
+  }
+
+  function isPanelActionsDialogOpen() {
+    if (!panelActionsDialog) return false;
+    if (typeof panelActionsDialog.open === "boolean") return panelActionsDialog.open;
+    return panelActionsDialog.hasAttribute("open");
+  }
+
+  function openPanelActionsDialog() {
+    if (!panelActionsDialog || !panelActionsMore) return;
+    if (isPanelActionsDialogOpen()) return;
+
+    panelActionsMore.setAttribute("aria-expanded", "true");
+    if (typeof panelActionsDialog.showModal === "function") {
+      try {
+        panelActionsDialog.showModal();
+        return;
+      } catch {}
+    }
+    panelActionsDialog.setAttribute("open", "true");
+  }
+
+  function closePanelActionsDialog(restoreFocus = true) {
+    if (!panelActionsDialog || !panelActionsMore) return;
+    if (!isPanelActionsDialogOpen()) return;
+
+    if (typeof panelActionsDialog.close === "function") {
+      try {
+        panelActionsDialog.close();
+      } catch {
+        panelActionsDialog.removeAttribute("open");
+      }
+    } else panelActionsDialog.removeAttribute("open");
+    panelActionsMore.setAttribute("aria-expanded", "false");
+
+    if (restoreFocus) panelActionsMore?.focus?.({ preventScroll: true });
   }
 
   function modPositive(value, modulus) {
@@ -344,13 +658,15 @@
 
   function hapticTick(currentOmega) {
     if (!navigator.vibrate) return;
-    const durationMs = currentOmega > 10 ? 10 : currentOmega > 5 ? 14 : currentOmega > 2 ? 18 : 22;
+    if (document.hidden) return;
+    const durationMs = Math.round(clamp(22 - currentOmega * 0.7, 12, 22));
     navigator.vibrate(durationMs);
   }
 
   function hapticFinal() {
     if (!navigator.vibrate) return;
-    navigator.vibrate([0, 60]);
+    if (document.hidden) return;
+    navigator.vibrate(60);
   }
 
   function ensureAudio() {
@@ -360,22 +676,181 @@
       if (!Ctx) return false;
       audioCtx = new Ctx();
       masterGain = audioCtx.createGain();
-      masterGain.gain.value = 0.9;
+      masterGain.gain.value = 0.85;
       masterGain.connect(audioCtx.destination);
     }
 
     if (audioCtx.state === "suspended") {
-      audioCtx.resume().catch(() => {});
+      audioCtx.resume().catch(() => { });
     }
+
+    ensureNoiseBuffer();
     return true;
+  }
+
+  function ensureNoiseBuffer() {
+    if (!audioCtx) return;
+    if (noiseBuffer) return;
+
+    const sampleRate = audioCtx.sampleRate || 48000;
+    const length = Math.max(1, Math.floor(sampleRate * 1.0));
+    const buffer = audioCtx.createBuffer(1, length, sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < length; i += 1) data[i] = (random.next() * 2 - 1) * 0.9;
+    noiseBuffer = buffer;
+  }
+
+  function randBetween(min, max) {
+    return min + (max - min) * random.next();
   }
 
   function playTickSound(currentOmega) {
     if (!audioEnabled) return;
     if (!ensureAudio()) return;
     const now = audioCtx.currentTime;
-    const freq = currentOmega > 10 ? 820 : currentOmega > 5 ? 700 : 560;
+    const jitter = randBetween(-0.015, 0.015);
+    const tickDur = currentOmega > 10 ? 0.035 : currentOmega > 5 ? 0.045 : 0.055;
 
+    if (soundMode === "mechanical") {
+      // Mechanical: Short, sharp click (filtered noise simulation)
+      const osc = audioCtx.createOscillator();
+      osc.type = "triangle";
+      osc.frequency.setValueAtTime(600, now);
+      osc.frequency.exponentialRampToValueAtTime(100, now + 0.02);
+
+      const gain = audioCtx.createGain();
+      gain.gain.setValueAtTime(0.4, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.03);
+
+      osc.connect(gain);
+      gain.connect(masterGain);
+      osc.start(now);
+      osc.stop(now + 0.04);
+      return;
+    }
+
+    if (soundMode === "arcade") {
+      // Arcade: 8-bit blip
+      const osc = audioCtx.createOscillator();
+      osc.type = "square";
+      osc.frequency.setValueAtTime(600 + currentOmega * 40, now);
+
+      const gain = audioCtx.createGain();
+      gain.gain.setValueAtTime(0.08, now);
+      gain.gain.linearRampToValueAtTime(0, now + 0.04);
+
+      osc.connect(gain);
+      gain.connect(masterGain);
+      osc.start(now);
+      osc.stop(now + 0.05);
+      return;
+    }
+
+    if (soundMode === "soft") {
+      const freq = (520 + clamp(currentOmega, 0, 18) * 22) * (1 + jitter);
+      const osc = audioCtx.createOscillator();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(freq, now);
+
+      const gain = audioCtx.createGain();
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.linearRampToValueAtTime(0.06, now + 0.004);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + tickDur);
+
+      osc.connect(gain);
+      gain.connect(masterGain);
+      osc.start(now);
+      osc.stop(now + tickDur + 0.02);
+      return;
+    }
+
+    if (soundMode === "wood") {
+      const noise = audioCtx.createBufferSource();
+      if (noiseBuffer) noise.buffer = noiseBuffer;
+      noise.loop = true;
+
+      const bp = audioCtx.createBiquadFilter();
+      bp.type = "bandpass";
+      bp.frequency.setValueAtTime(820 * (1 + jitter), now);
+      bp.Q.setValueAtTime(0.7, now);
+
+      const nGain = audioCtx.createGain();
+      nGain.gain.setValueAtTime(0.0001, now);
+      nGain.gain.linearRampToValueAtTime(0.16, now + 0.003);
+      nGain.gain.exponentialRampToValueAtTime(0.0001, now + tickDur);
+
+      const osc = audioCtx.createOscillator();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(220 * (1 + jitter), now);
+      osc.frequency.exponentialRampToValueAtTime(120, now + tickDur + 0.01);
+
+      const oGain = audioCtx.createGain();
+      oGain.gain.setValueAtTime(0.0001, now);
+      oGain.gain.linearRampToValueAtTime(0.10, now + 0.004);
+      oGain.gain.exponentialRampToValueAtTime(0.0001, now + tickDur + 0.02);
+
+      noise.connect(bp);
+      bp.connect(nGain);
+      nGain.connect(masterGain);
+
+      osc.connect(oGain);
+      oGain.connect(masterGain);
+
+      noise.start(now, randBetween(0, 0.85));
+      noise.stop(now + tickDur + 0.02);
+      osc.start(now);
+      osc.stop(now + tickDur + 0.04);
+      return;
+    }
+
+    if (soundMode === "bell") {
+      const base = (740 + clamp(currentOmega, 0, 18) * 14) * (1 + jitter);
+      const tones = [base, base * 2.01];
+      tones.forEach((freq, i) => {
+        const osc = audioCtx.createOscillator();
+        osc.type = i === 0 ? "triangle" : "sine";
+        osc.frequency.setValueAtTime(freq, now);
+
+        const gain = audioCtx.createGain();
+        gain.gain.setValueAtTime(0.0001, now);
+        gain.gain.linearRampToValueAtTime(i === 0 ? 0.06 : 0.03, now + 0.003);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + tickDur + 0.04);
+
+        osc.connect(gain);
+        gain.connect(masterGain);
+        osc.start(now);
+        osc.stop(now + tickDur + 0.08);
+      });
+      return;
+    }
+
+    if (soundMode === "scifi") {
+      const osc = audioCtx.createOscillator();
+      osc.type = "sawtooth";
+      osc.frequency.setValueAtTime(260 + clamp(currentOmega, 0, 18) * 26, now);
+      osc.detune.setValueAtTime(randBetween(-14, 14), now);
+
+      const lp = audioCtx.createBiquadFilter();
+      lp.type = "lowpass";
+      lp.Q.setValueAtTime(7, now);
+      lp.frequency.setValueAtTime(2200, now);
+      lp.frequency.exponentialRampToValueAtTime(520, now + tickDur + 0.02);
+
+      const gain = audioCtx.createGain();
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.linearRampToValueAtTime(0.05, now + 0.003);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + tickDur + 0.03);
+
+      osc.connect(lp);
+      lp.connect(gain);
+      gain.connect(masterGain);
+      osc.start(now);
+      osc.stop(now + tickDur + 0.05);
+      return;
+    }
+
+    // Default
+    const freq = (currentOmega > 10 ? 820 : currentOmega > 5 ? 700 : 560) * (1 + jitter);
     const osc = audioCtx.createOscillator();
     osc.type = "triangle";
     osc.frequency.value = freq;
@@ -383,12 +858,12 @@
     const gain = audioCtx.createGain();
     gain.gain.setValueAtTime(0, now);
     gain.gain.linearRampToValueAtTime(0.08, now + 0.005);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + tickDur + 0.01);
 
     osc.connect(gain);
     gain.connect(masterGain);
     osc.start(now);
-    osc.stop(now + 0.08);
+    osc.stop(now + tickDur + 0.03);
   }
 
   function playLockSound() {
@@ -396,6 +871,133 @@
     if (!ensureAudio()) return;
     const now = audioCtx.currentTime;
 
+    if (soundMode === "mechanical") {
+      // Mechanical: Heavy latch
+      const osc = audioCtx.createOscillator();
+      osc.type = "triangle";
+      osc.frequency.setValueAtTime(120, now);
+      osc.frequency.exponentialRampToValueAtTime(40, now + 0.15);
+
+      const gain = audioCtx.createGain();
+      gain.gain.setValueAtTime(0.5, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+
+      osc.connect(gain);
+      gain.connect(masterGain);
+      osc.start(now);
+      osc.stop(now + 0.25);
+      return;
+    }
+
+    if (soundMode === "arcade") {
+      // Arcade: Win jingle (faster)
+      const tones = [523.25, 659.25, 783.99, 1046.50, 1318.51, 1567.98]; // C E G C E G
+      tones.forEach((freq, i) => {
+        const t = now + i * 0.06;
+        const osc = audioCtx.createOscillator();
+        osc.type = "square";
+        osc.frequency.value = freq;
+
+        const gain = audioCtx.createGain();
+        gain.gain.setValueAtTime(0.06, t);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.08);
+
+        osc.connect(gain);
+        gain.connect(masterGain);
+        osc.start(t);
+        osc.stop(t + 0.1);
+      });
+      return;
+    }
+
+    if (soundMode === "soft") {
+      const tones = [523.25, 659.25, 783.99]; // C E G
+      tones.forEach((freq, i) => {
+        const t = now + i * 0.06;
+        const osc = audioCtx.createOscillator();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(freq, t);
+
+        const gain = audioCtx.createGain();
+        gain.gain.setValueAtTime(0.0001, t);
+        gain.gain.linearRampToValueAtTime(0.10, t + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.32);
+
+        osc.connect(gain);
+        gain.connect(masterGain);
+        osc.start(t);
+        osc.stop(t + 0.36);
+      });
+      return;
+    }
+
+    if (soundMode === "wood") {
+      const times = [0, 0.08];
+      times.forEach((offset, i) => {
+        const t = now + offset;
+        const osc = audioCtx.createOscillator();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(i === 0 ? 140 : 110, t);
+        osc.frequency.exponentialRampToValueAtTime(70, t + 0.12);
+
+        const gain = audioCtx.createGain();
+        gain.gain.setValueAtTime(0.0001, t);
+        gain.gain.linearRampToValueAtTime(i === 0 ? 0.18 : 0.14, t + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+
+        osc.connect(gain);
+        gain.connect(masterGain);
+        osc.start(t);
+        osc.stop(t + 0.22);
+      });
+      return;
+    }
+
+    if (soundMode === "bell") {
+      const tones = [1046.5, 1318.51, 1567.98]; // C6 E6 G6
+      tones.forEach((freq) => {
+        const osc = audioCtx.createOscillator();
+        osc.type = "triangle";
+        osc.frequency.setValueAtTime(freq, now);
+
+        const gain = audioCtx.createGain();
+        gain.gain.setValueAtTime(0.0001, now);
+        gain.gain.linearRampToValueAtTime(0.08, now + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.6);
+
+        osc.connect(gain);
+        gain.connect(masterGain);
+        osc.start(now);
+        osc.stop(now + 0.7);
+      });
+      return;
+    }
+
+    if (soundMode === "scifi") {
+      const osc = audioCtx.createOscillator();
+      osc.type = "square";
+      osc.frequency.setValueAtTime(260, now);
+      osc.frequency.exponentialRampToValueAtTime(980, now + 0.14);
+
+      const bp = audioCtx.createBiquadFilter();
+      bp.type = "bandpass";
+      bp.frequency.setValueAtTime(900, now);
+      bp.Q.setValueAtTime(3.5, now);
+
+      const gain = audioCtx.createGain();
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.linearRampToValueAtTime(0.14, now + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.26);
+
+      osc.connect(bp);
+      bp.connect(gain);
+      gain.connect(masterGain);
+      osc.start(now);
+      osc.stop(now + 0.3);
+      return;
+    }
+
+    // Default
     const tones = [523.25, 659.25];
     const nodes = [];
 
@@ -455,12 +1057,12 @@
   }
 
   function resultFocusables() {
-    return [resultClose, spinAgain].filter((el) => el && typeof el.focus === "function" && !el.disabled);
+    return [resultClose, confirmResult, spinAgain].filter((el) => el && typeof el.focus === "function" && !el.disabled);
   }
 
   function focusResultPrimary() {
     const focusables = resultFocusables();
-    const target = focusables.find((el) => el === spinAgain) ?? focusables[0] ?? resultCard;
+    const target = focusables.find((el) => el === confirmResult) ?? focusables.find((el) => el === spinAgain) ?? focusables[0] ?? resultCard;
     target?.focus?.({ preventScroll: true });
   }
 
@@ -482,6 +1084,7 @@
     requestAnimationFrame(() => {
       document.body.classList.add("show-result");
       focusResultPrimary();
+      if (typeof window.startConfetti === "function") window.startConfetti();
     });
   }
 
@@ -541,6 +1144,7 @@
   const WHEELS_STORAGE_KEY = "spinWheel.wheels.v1";
   const CURRENT_WHEEL_KEY = "spinWheel.currentWheel.v1";
   const AUDIO_ENABLED_KEY = "spinWheel.audioEnabled.v1";
+  const SOUND_MODE_KEY = "spinWheel.soundMode.v1";
   const PANEL_SIZE_KEY = "spinWheel.panelSizeVh.v1";
   const PANEL_COLLAPSED_KEY = "spinWheel.panelCollapsed.v1";
   const MAX_SAVED_WHEELS = 40;
@@ -820,6 +1424,8 @@
       range.min = "0";
       range.max = "100";
       range.step = "1";
+      range.setAttribute("data-weight-range", "true");
+      range.setAttribute("data-index", String(idx));
       range.value = String(Math.round(clamp(coerceWeight(weights[idx], 1), 0, 100)));
       range.setAttribute("aria-label", `“${initialText}” 概率权重`);
       setRangeFill(range);
@@ -849,12 +1455,7 @@
       });
 
       range.addEventListener("input", () => {
-        weights[idx] = coerceWeight(range.value, 1);
-        if (totalWeight() <= 0) {
-          weights[idx] = 1;
-          range.value = "1";
-        }
-        setRangeFill(range);
+        setWeightPercent(idx, range.value);
         refreshWeightPercents();
         scheduleSaveCurrentWheel();
       });
@@ -1076,6 +1677,7 @@
 
     hideResult(false);
     highlightIndex = null;
+    ensureAudio();
 
     const n = options.length;
     selectedIndex = weightedIndex();
@@ -1153,9 +1755,60 @@
     requestAnimationFrame(frame);
   }
 
+  function openImportDialog() {
+    importTextEl.value = options.join("\n");
+    if (typeof importDialog.showModal === "function") importDialog.showModal();
+    else importDialog.setAttribute("open", "true");
+  }
+
+  function exportJson() {
+    const data = {
+      options,
+      weights,
+      panelSize: localStorage.getItem(PANEL_SIZE_KEY),
+      audioEnabled: localStorage.getItem(AUDIO_ENABLED_KEY),
+      soundMode: localStorage.getItem(SOUND_MODE_KEY),
+      panelCollapsed: localStorage.getItem(PANEL_COLLAPSED_KEY),
+      wheels: readWheelLibrary(),
+      exportedAt: Date.now(),
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `spin-wheel-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function triggerImportJson() {
+    importJsonInput?.click();
+  }
+
+  function openWheelsDialog() {
+    setWheelMessage("");
+    const selectedId = String(wheelSelectEl?.value ?? "");
+    populateWheelSelect(selectedId);
+    const wheel = wheelById(String(wheelSelectEl?.value ?? ""));
+    if (wheelNameEl) wheelNameEl.value = wheel?.name ?? "";
+    if (typeof wheelDialog?.showModal === "function") wheelDialog.showModal();
+    else wheelDialog?.setAttribute("open", "true");
+  }
+
   function installHandlers() {
-    spinFab.addEventListener("click", () => startSpin());
-    spinAgain.addEventListener("click", () => startSpin());
+    spinFab.addEventListener("click", () => {
+      if (spinning) return;
+      startSpin();
+    });
+
+    confirmResult?.addEventListener("click", () => {
+      hideResult();
+    });
+
+    spinAgain.addEventListener("click", () => {
+      hideResult();
+      startSpin();
+    });
 
     addOptionBtn.addEventListener("click", () => {
       options.push(`选项 ${options.length + 1}`);
@@ -1167,19 +1820,58 @@
     });
 
     openImportBtn.addEventListener("click", () => {
-      importTextEl.value = options.join("\n");
-      if (typeof importDialog.showModal === "function") importDialog.showModal();
-      else importDialog.setAttribute("open", "true");
+      openImportDialog();
+    });
+
+    exportJsonBtn?.addEventListener("click", () => {
+      exportJson();
+    });
+
+    importJsonBtn?.addEventListener("click", () => {
+      triggerImportJson();
+    });
+
+    importJsonInput?.addEventListener("change", async (event) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const data = JSON.parse(text);
+
+        if (Array.isArray(data.options) && data.options.length > 0) {
+          options = data.options;
+          weights = Array.isArray(data.weights) ? data.weights : options.map(() => 1);
+          syncWeights();
+          renderOptionsList();
+          scheduleSaveCurrentWheel();
+          scheduleLayout();
+        }
+
+        if (data.wheels) {
+          writeWheelLibrary(data.wheels);
+        }
+
+        if (data.audioEnabled !== undefined) {
+          audioEnabled = data.audioEnabled === "1" || data.audioEnabled === "true";
+          setAudioToggleUi(audioEnabled);
+          writeStoredBool(AUDIO_ENABLED_KEY, audioEnabled);
+        }
+        if (data.soundMode) {
+          soundMode = data.soundMode;
+          localStorage.setItem(SOUND_MODE_KEY, soundMode);
+          if (soundModeSelect) soundModeSelect.value = soundMode;
+        }
+
+        alert("导入成功！");
+      } catch (e) {
+        alert("导入失败：文件格式错误");
+        console.error(e);
+      }
+      event.target.value = "";
     });
 
     openWheelsBtn?.addEventListener("click", () => {
-      setWheelMessage("");
-      const selectedId = String(wheelSelectEl?.value ?? "");
-      populateWheelSelect(selectedId);
-      const wheel = wheelById(String(wheelSelectEl?.value ?? ""));
-      if (wheelNameEl) wheelNameEl.value = wheel?.name ?? "";
-      if (typeof wheelDialog?.showModal === "function") wheelDialog.showModal();
-      else wheelDialog?.setAttribute("open", "true");
+      openWheelsDialog();
     });
 
     wheelDialog?.addEventListener("close", () => {
@@ -1234,12 +1926,90 @@
       setPanelCollapsed(!panelCollapsed, true);
     });
 
-    panelSizeRange?.addEventListener("input", () => {
-      applyPanelSizeVh(panelSizeRange.value);
+    const getViewportHeight = () => window.visualViewport?.height ?? window.innerHeight ?? 1;
+    const getCurrentPanelVh = () => {
+      const rect = panelEl?.getBoundingClientRect?.();
+      if (!rect) return PANEL_MAX_VH;
+      const vh = (rect.height / Math.max(1, getViewportHeight())) * 100;
+      return clamp(vh, PANEL_MIN_VH, PANEL_MAX_VH);
+    };
+
+    if (panelDragHandle) {
+      let dragging = false;
+      let startClientY = 0;
+      let startVh = PANEL_MAX_VH;
+
+      const endDrag = () => {
+        dragging = false;
+        startClientY = 0;
+      };
+
+      panelDragHandle.addEventListener("pointerdown", (event) => {
+        if (!isMobilePanel()) return;
+        if (event.pointerType === "mouse" && event.button !== 0) return;
+        event.preventDefault();
+        closePanelActionsDialog(false);
+        if (panelCollapsed) setPanelCollapsed(false, false);
+        dragging = true;
+        startClientY = event.clientY;
+        startVh = getCurrentPanelVh();
+        panelDragHandle.setPointerCapture?.(event.pointerId);
+      });
+
+      panelDragHandle.addEventListener("pointermove", (event) => {
+        if (!dragging) return;
+        if (!isMobilePanel()) return;
+        const dy = event.clientY - startClientY;
+        const next = startVh - (dy / Math.max(1, getViewportHeight())) * 100;
+        applyPanelSizeVh(next);
+      });
+
+      panelDragHandle.addEventListener("pointerup", () => endDrag());
+      panelDragHandle.addEventListener("pointercancel", () => endDrag());
+    }
+
+    panelActionsMore?.addEventListener("click", (event) => {
+      event.preventDefault();
+      if (isPanelActionsDialogOpen()) closePanelActionsDialog(false);
+      else openPanelActionsDialog();
     });
 
-    panelSizeReset?.addEventListener("click", () => {
-      applyPanelSizeVh(46);
+    panelActionsDialog?.addEventListener("close", () => {
+      panelActionsMore?.setAttribute("aria-expanded", "false");
+    });
+
+    panelActionsDialog?.addEventListener("click", (event) => {
+      const target = event.target instanceof Element ? event.target : null;
+      const item = target?.closest?.("[data-action-target]");
+      if (!item) return;
+
+      const actionTarget = item.getAttribute("data-action-target");
+      closePanelActionsDialog(false);
+      setTimeout(() => {
+        if (actionTarget === "openWheels") openWheelsDialog();
+        else if (actionTarget === "openImport") openImportDialog();
+        else if (actionTarget === "exportJson") exportJson();
+        else if (actionTarget === "importJsonBtn") triggerImportJson();
+        else document.getElementById(actionTarget)?.click?.();
+      }, 0);
+    });
+
+    document.addEventListener("keydown", (event) => {
+      if (event.defaultPrevented) return;
+      if (event.key !== "Escape") return;
+      if (!isPanelActionsDialogOpen()) return;
+      event.preventDefault();
+      closePanelActionsDialog();
+    });
+
+    avgWeightsBtn?.addEventListener("click", () => {
+      averageWeights();
+    });
+
+    soundModeSelect?.addEventListener("change", () => {
+      soundMode = soundModeSelect.value;
+      localStorage.setItem(SOUND_MODE_KEY, soundMode);
+      playTickSound(10); // Preview sound
     });
 
     resultBackdrop.addEventListener("click", () => hideResult());
@@ -1295,23 +2065,29 @@
       audioEnabled = !audioEnabled;
       setAudioToggleUi(audioEnabled);
       writeStoredBool(AUDIO_ENABLED_KEY, audioEnabled);
+      if (audioEnabled) ensureAudio();
     });
 
-    window.addEventListener("resize", () => scheduleLayout(), { passive: true });
+    window.addEventListener(
+      "resize",
+      () => {
+        closePanelActionsDialog(false);
+        scheduleLayout();
+      },
+      { passive: true },
+    );
   }
 
   audioEnabled = loadAudioEnabled();
   setAudioToggleUi(audioEnabled);
+  soundMode = localStorage.getItem(SOUND_MODE_KEY) || "default";
+  if (soundModeSelect) soundModeSelect.value = soundMode;
 
   const restored = loadCurrentWheel();
   if (!restored) renderOptionsList();
 
   installHandlers();
-  loadPanelSizeVh();
-
-  const storedCollapsed = readStoredBool(PANEL_COLLAPSED_KEY);
-  const autoCollapsed = window.matchMedia?.("(max-height: 780px)")?.matches ?? false;
-  setPanelCollapsed(storedCollapsed ?? autoCollapsed);
+  setPanelCollapsed(false, false);
   scheduleLayout();
   requestAnimationFrame(frame);
 })();

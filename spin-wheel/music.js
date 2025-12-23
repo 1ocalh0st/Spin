@@ -8,6 +8,7 @@
     volumeLastAudible: "spinWheel.music.volumeLastAudible.v1",
     muted: "spinWheel.music.muted.v1",
     settingsOpen: "spinWheel.music.settingsOpen.v1",
+    fabOffset: "spinWheel.music.fabOffset.v1",
   };
 
   const widgetEl = document.getElementById("musicWidget");
@@ -98,6 +99,61 @@
     return Number.isFinite(num) ? num : null;
   }
 
+  function readJson(key) {
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return null;
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+
+  function writeJson(key, value) {
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function setFabOffset(x, y, { persist = false } = {}) {
+    const nx = Number(x);
+    const ny = Number(y);
+    const safeX = Number.isFinite(nx) ? nx : 0;
+    const safeY = Number.isFinite(ny) ? ny : 0;
+    widgetEl.style.setProperty("--music-fab-x", `${safeX.toFixed(2)}px`);
+    widgetEl.style.setProperty("--music-fab-y", `${safeY.toFixed(2)}px`);
+    if (persist) writeJson(STORAGE.fabOffset, { x: safeX, y: safeY });
+  }
+
+  function getViewportBox() {
+    const vv = window.visualViewport;
+    if (vv) {
+      return {
+        left: vv.offsetLeft,
+        top: vv.offsetTop,
+        width: vv.width,
+        height: vv.height,
+      };
+    }
+    return { left: 0, top: 0, width: window.innerWidth || 1, height: window.innerHeight || 1 };
+  }
+
+  function clampFabOffset(nextX, nextY, widgetRect) {
+    const vp = getViewportBox();
+    const padding = 8;
+    const minDx = (vp.left + padding) - widgetRect.left;
+    const maxDx = (vp.left + vp.width - padding) - widgetRect.right;
+    const minDy = (vp.top + padding) - widgetRect.top;
+    const maxDy = (vp.top + vp.height - padding) - widgetRect.bottom;
+    return {
+      x: Math.min(maxDx, Math.max(minDx, nextX)),
+      y: Math.min(maxDy, Math.max(minDy, nextY)),
+    };
+  }
+
   function formatTime(seconds) {
     const s = Math.max(0, Math.floor(Number(seconds) || 0));
     const m = Math.floor(s / 60);
@@ -164,9 +220,86 @@
     else openPanel();
   }
 
-  fab.addEventListener("click", () => togglePanel());
+  let suppressFabClick = false;
+  fab.addEventListener("click", () => {
+    if (suppressFabClick) {
+      suppressFabClick = false;
+      return;
+    }
+    togglePanel();
+  });
   backdrop.addEventListener("click", () => closePanel());
   closeBtn?.addEventListener("click", () => closePanel());
+
+  (() => {
+    const stored = readJson(STORAGE.fabOffset);
+    if (stored && typeof stored === "object") setFabOffset(stored.x, stored.y, { persist: false });
+
+    let dragging = false;
+    let startX = 0;
+    let startY = 0;
+    let startOffsetX = 0;
+    let startOffsetY = 0;
+    let baseRect = null;
+
+    const parsePx = (value) => {
+      const num = Number(String(value ?? "").replace("px", ""));
+      return Number.isFinite(num) ? num : 0;
+    };
+
+    const currentOffset = () => ({
+      x: parsePx(getComputedStyle(widgetEl).getPropertyValue("--music-fab-x")),
+      y: parsePx(getComputedStyle(widgetEl).getPropertyValue("--music-fab-y")),
+    });
+
+    const endDrag = () => {
+      if (!dragging) return;
+      dragging = false;
+      baseRect = null;
+      const { x, y } = currentOffset();
+      setFabOffset(x, y, { persist: true });
+    };
+
+    fab.addEventListener("pointerdown", (event) => {
+      if (document.body.classList.contains("music-open")) return;
+      if (event.pointerType === "mouse" && event.button !== 0) return;
+      event.preventDefault();
+      fab.setPointerCapture?.(event.pointerId);
+      const cur = currentOffset();
+      startOffsetX = cur.x;
+      startOffsetY = cur.y;
+      startX = event.clientX;
+      startY = event.clientY;
+      baseRect = widgetEl.getBoundingClientRect();
+      dragging = true;
+      suppressFabClick = false;
+    });
+
+    fab.addEventListener("pointermove", (event) => {
+      if (!dragging || !baseRect) return;
+      const dx = event.clientX - startX;
+      const dy = event.clientY - startY;
+      if (!suppressFabClick && Math.hypot(dx, dy) >= 6) suppressFabClick = true;
+
+      const nextRawX = startOffsetX + dx;
+      const nextRawY = startOffsetY + dy;
+      const clamped = clampFabOffset(nextRawX, nextRawY, baseRect);
+      setFabOffset(clamped.x, clamped.y, { persist: false });
+    });
+
+    fab.addEventListener("pointerup", () => endDrag());
+    fab.addEventListener("pointercancel", () => endDrag());
+
+    const clampOnResize = () => {
+      const cur = currentOffset();
+      const rect = widgetEl.getBoundingClientRect();
+      const clamped = clampFabOffset(cur.x, cur.y, rect);
+      setFabOffset(clamped.x, clamped.y, { persist: true });
+    };
+
+    window.visualViewport?.addEventListener("resize", clampOnResize, { passive: true });
+    window.addEventListener("resize", clampOnResize, { passive: true });
+  })();
 
   document.addEventListener("keydown", (event) => {
     if (!document.body.classList.contains("music-open")) return;
@@ -942,12 +1075,17 @@
     const nextHidden = !settingsEl.hidden;
     settingsEl.hidden = nextHidden;
     writeBool(STORAGE.settingsOpen, !nextHidden);
+    if (openSettingsBtn) openSettingsBtn.setAttribute("aria-pressed", nextHidden ? "false" : "true");
+    setToast(nextHidden ? "设置已收起" : "设置已展开", "ok");
   }
 
   openSettingsBtn?.addEventListener("click", () => toggleSettings());
 
   uidInput && (uidInput.value = uid);
-  settingsEl && (settingsEl.hidden = !(readBool(STORAGE.settingsOpen) ?? false));
+  if (settingsEl) {
+    settingsEl.hidden = !(readBool(STORAGE.settingsOpen) ?? false);
+    if (openSettingsBtn) openSettingsBtn.setAttribute("aria-pressed", settingsEl.hidden ? "false" : "true");
+  }
 
   openPlaylistBtn?.addEventListener("click", () => {
     if (!playlistId) return;
