@@ -1,59 +1,69 @@
+```markdown
 # 转盘（Decision Wheel）
 
-一个零依赖的 Web/PWA 转盘 Demo：Spatial Glass + 液态动效，指数减速、临停悬念、震动/音效反馈，支持自定义概率（扇形面积随权重变化）与“转盘库”保存/载入。
+一个零依赖、高性能的 Web/PWA 转盘工具。采用 Spatial Glass 玻璃态视觉设计，集成网易云音乐播放器，支持自定义概率权重与多种沉浸式音效。
 
-## 快速开始（Windows / Android）
+## ✨ 核心更新 (New Updates)
 
-前置：安装 Node.js（任意近期版本即可）。
+- **🎼 多样化音效模式**: 新增“机械齿轮”、“游戏机”、“轻柔”、“木质”、“铃铛”及“科幻”等 6 种音效风格，可在面板中实时切换。
+- **🎵 音乐引擎升级**: 
+  - 后端 Node.js 服务新增网易云 API 代理，解决跨域请求与资源获取问题。
+  - 播放器支持根据歌曲封面自动提取主题色，动态更新悬浮球与面板的渐变背景。
+  - 支持 Media Session API，可在系统通知栏或锁屏界面控制播放。
+- **📱 移动端深度优化**: 
+  - 新增“面板高度”自定义功能，支持通过顶部拖拽手柄实时调整底部面板高度。
+  - 针对窄屏设备自动适配 UI 布局，提供“更多操作”弹出菜单。
+- **💾 数据同步与备份**: 支持将所有转盘库配置、权重设定及个性化偏好一键导出为 JSON 文件，或从本地导入恢复。
 
-1) 启动本地服务
-- `cd spin-wheel`
-- `node server.js`
+## 🚀 快速开始
 
-2) 打开页面
-- Windows：用浏览器打开 `http://localhost:5173`
-- Android（同一 Wi-Fi）：打开 `http://<电脑IP>:5173`
-- Android（推荐调试）：`adb reverse tcp:5173 tcp:5173` 后打开 `http://localhost:5173`
+### 1. 启动本地代理服务
+项目现在包含一个微型 Node.js 后端，用于托管文件并代理音乐 API。
+```bash
+cd spin-wheel
+node server.js
 
-> 若页面样式/逻辑没更新，可能被 Service Worker 缓存：浏览器“强制刷新”，或清理站点数据后再试。
+```
 
-## 功能一览
+服务默认运行在 `http://localhost:5173`。
 
-- 转盘物理：指数衰减减速（非匀速停止），指针命中与结果映射统一，避免不一致。
-- 悬念模式：临停阶段自动增强视觉/音量压低，并提供更明显的指针 tick 动效与扇区高亮。
-- 震动反馈：按扇区边界触发 tick（`navigator.vibrate()`），随转速变慢由密到疏，停止时重击。
-- 音效：转盘 tick/锁定音（无背景氛围音）；需要用户手势解锁；右上角按钮开关。
-- 快速输入：支持粘贴文本自动分割（换行/逗号/中文逗号）；内置预设一键填充选项。
-- 自定义概率：每个选项有权重滑条；权重同时影响“抽中概率”和“扇形面积”；`0` 权重会变成 0 面积且不会被抽中。
-- 转盘库：支持自定义命名保存/载入/删除（含权重），存储在本机浏览器 `localStorage`。
-- 选项面板：可收起；支持“面板高度”滑条自定义（持久化到本机）。
-- PWA/离线：注册 Service Worker，支持离线打开（缓存静态资源）。
-- 音乐悬浮球：左下角网易云歌单播放器（可切换 UID/歌单），支持搜索/上一首下一首/进度条，悬浮球随封面自动取色渐变。
+### 2. 访问方式
 
-## 使用说明
+* **PC 端**: 直接浏览器访问。
+* **Android**: 同一 Wi-Fi 下访问电脑 IP 端口。推荐使用 `adb reverse tcp:5173 tcp:5173` 实现 localhost 离线调试。
 
-- 编辑选项：在“选项”列表里直接改文本；右侧 `×` 删除。
-- 概率/面积：拖动每个选项下方的权重滑条；右侧显示该项占比（会随其他项变化）。
-- 保存转盘：点“转盘”→ 输入名称 → “保存”；同名会覆盖更新。
-- 载入/删除：在“转盘库”选择已保存转盘 → “载入/删除”。
-- 调面板高度：拖动“面板高度”滑条；“重置”恢复默认。
+## 🛠 功能详情
 
-## 目录结构
+* **自定义概率权重**: 每个选项的权重滑条同时影响“抽中概率”和“扇形面积”。支持“平均分配”权重。
+* **沉浸式转动体验**:
+* 指数减速物理模拟，临停阶段进入“悬念模式”（视觉压低、指针 tick 频率变化）。
+* 触觉反馈：随转速变慢触发由密到疏的震动（`navigator.vibrate`）。
 
-- `spin-wheel/index.html`：页面结构（顶部栏/转盘舞台/底部面板/对话框）
-- `spin-wheel/styles.css`：玻璃液态风格与交互动效、滚动条/滑条样式
-- `spin-wheel/app.js`：转盘绘制（Canvas）、物理/悬念/震动/音频、权重分段、转盘库与面板设置
-- `spin-wheel/music.js`：网易云歌单播放器（悬浮球/面板、播放控制、取色渐变、缓存与持久化）
-- `spin-wheel/server.js`：零依赖静态文件服务器（默认端口 `5173`）
-- `spin-wheel/sw.js`：Service Worker 缓存策略
 
-## 兼容性与注意事项
+* **转盘库管理**: 支持在本机浏览器（LocalStorage）保存多个命名转盘，包含其特定的权重设定。
+* **PWA 支持**: 离线可用，支持添加到桌面作为独立应用运行。
 
-- `navigator.vibrate()` 主要在 Android/Chrome 有效；桌面端通常会降级为无震动。
-- 音频与剪贴板读取通常需要“用户手势”与“安全上下文”（`https`/`localhost`）。真机调试推荐用 `adb reverse` 走 `localhost`。
-- 权重很小的扇区会非常窄；为保证可读性，极窄扇区可能不显示文字（但仍可被指针命中/抽中）。
-- 网易云歌单：部分歌曲可能因版权/VIP/地区限制无法获取播放地址；组件会提示并跳过不可播放曲目。
+## 📁 目录结构
 
-## 视觉方向（可选 Prompt）
+* `server.js`: 零依赖静态文件服务器 + 网易云 API 转发代理。
+* `app.js`: 转盘核心逻辑：Canvas 绘制、物理引擎、音效系统。
+* `music.js`: 音乐播放器插件：包含自动取色、歌单搜索及控制逻辑。
+* `styles.css`: 响应式玻璃态（Glassmorphism）样式实现。
+* `confetti.js`: 结果揭晓时的五彩纸屑特效。
 
-`Mobile app UI design, decision making wheel, Spatial UI style, glassmorphism, frosted glass transparency, soft blurred background gradients, sleek and futuristic, floating 3D disc wheel with subtle glowing edges, elegant sans-serif typography, pastel color scheme (soft purple, mint, peach), interactive lighting effects, liquid motion interface, clean layout, plenty of negative space, floating action button at the bottom, 8k, photorealistic rendering, Figma style, sophisticated aesthetic --ar 9:16 --stylize 250`
+## 📝 注意事项
+
+1. **音乐播放**: 部分网易云曲目可能因版权或地区限制无法播放，服务器部署在海外时受限较多。
+2. **手势限制**: 根据浏览器安全策略，首次播放音频或读取剪贴板内容需要用户在页面上产生交互手势。
+
+```
+
+---
+
+### 主要修改说明：
+1. **API 代理说明**：补充了 `server.js` 的作用，现在它不仅是静态服务器，还负责处理 `/api/netease/` 下的请求。
+2. **音效模式**：在 `app.js` 中新增了 `soundMode` 逻辑，README 对应增加了该功能的描述。
+3. **交互增强**：明确了 `panelDragHandle` 带来的面板高度自定义功能。
+4. **视觉增强**：加入了 `music.js` 中复杂的 KMeans 聚类取色算法带来的视觉反馈说明。
+
+```
