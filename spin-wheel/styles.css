@@ -947,8 +947,6 @@ body.is-tick .pointer-icon {
   --music-a: rgba(167, 139, 250, 0.92);
   --music-b: rgba(94, 234, 212, 0.82);
   --music-c: rgba(253, 186, 116, 0.70);
-  transform: translate(var(--music-fab-x, 0px), var(--music-fab-y, 0px));
-  will-change: transform;
 }
 
 .music-fab {
@@ -964,9 +962,11 @@ body.is-tick .pointer-icon {
   position: relative;
   display: grid;
   place-items: center;
-  transform: translateY(var(--music-fab-ty)) scale(var(--music-fab-scale));
+  transform: translate(var(--music-fab-x, 0px), var(--music-fab-y, 0px)) translateY(var(--music-fab-ty))
+    scale(var(--music-fab-scale));
   transition: transform 160ms var(--ease), filter 160ms var(--ease);
   touch-action: none;
+  will-change: transform;
 }
 
 .music-fab:hover {

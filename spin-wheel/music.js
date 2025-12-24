@@ -123,8 +123,8 @@
     const ny = Number(y);
     const safeX = Number.isFinite(nx) ? nx : 0;
     const safeY = Number.isFinite(ny) ? ny : 0;
-    widgetEl.style.setProperty("--music-fab-x", `${safeX.toFixed(2)}px`);
-    widgetEl.style.setProperty("--music-fab-y", `${safeY.toFixed(2)}px`);
+    fab.style.setProperty("--music-fab-x", `${safeX.toFixed(2)}px`);
+    fab.style.setProperty("--music-fab-y", `${safeY.toFixed(2)}px`);
     if (persist) writeJson(STORAGE.fabOffset, { x: safeX, y: safeY });
   }
 
@@ -141,17 +141,21 @@
     return { left: 0, top: 0, width: window.innerWidth || 1, height: window.innerHeight || 1 };
   }
 
-  function clampFabOffset(nextX, nextY, widgetRect) {
+  function clampFabOffset(nextX, nextY, rectAtStart, startOffset) {
     const vp = getViewportBox();
     const padding = 8;
-    const minDx = (vp.left + padding) - widgetRect.left;
-    const maxDx = (vp.left + vp.width - padding) - widgetRect.right;
-    const minDy = (vp.top + padding) - widgetRect.top;
-    const maxDy = (vp.top + vp.height - padding) - widgetRect.bottom;
-    return {
-      x: Math.min(maxDx, Math.max(minDx, nextX)),
-      y: Math.min(maxDy, Math.max(minDy, nextY)),
-    };
+
+    const minRelDx = (vp.left + padding) - rectAtStart.left;
+    const maxRelDx = (vp.left + vp.width - padding) - rectAtStart.right;
+    const minRelDy = (vp.top + padding) - rectAtStart.top;
+    const maxRelDy = (vp.top + vp.height - padding) - rectAtStart.bottom;
+
+    const minX = startOffset.x + minRelDx;
+    const maxX = startOffset.x + maxRelDx;
+    const minY = startOffset.y + minRelDy;
+    const maxY = startOffset.y + maxRelDy;
+
+    return { x: Math.min(maxX, Math.max(minX, nextX)), y: Math.min(maxY, Math.max(minY, nextY)) };
   }
 
   function formatTime(seconds) {
@@ -240,7 +244,8 @@
     let startY = 0;
     let startOffsetX = 0;
     let startOffsetY = 0;
-    let baseRect = null;
+    let rectAtStart = null;
+    let startOffset = { x: 0, y: 0 };
 
     const parsePx = (value) => {
       const num = Number(String(value ?? "").replace("px", ""));
@@ -248,14 +253,14 @@
     };
 
     const currentOffset = () => ({
-      x: parsePx(getComputedStyle(widgetEl).getPropertyValue("--music-fab-x")),
-      y: parsePx(getComputedStyle(widgetEl).getPropertyValue("--music-fab-y")),
+      x: parsePx(getComputedStyle(fab).getPropertyValue("--music-fab-x")),
+      y: parsePx(getComputedStyle(fab).getPropertyValue("--music-fab-y")),
     });
 
     const endDrag = () => {
       if (!dragging) return;
       dragging = false;
-      baseRect = null;
+      rectAtStart = null;
       const { x, y } = currentOffset();
       setFabOffset(x, y, { persist: true });
     };
@@ -268,22 +273,23 @@
       const cur = currentOffset();
       startOffsetX = cur.x;
       startOffsetY = cur.y;
+      startOffset = { x: cur.x, y: cur.y };
       startX = event.clientX;
       startY = event.clientY;
-      baseRect = widgetEl.getBoundingClientRect();
+      rectAtStart = fab.getBoundingClientRect();
       dragging = true;
       suppressFabClick = false;
     });
 
     fab.addEventListener("pointermove", (event) => {
-      if (!dragging || !baseRect) return;
+      if (!dragging || !rectAtStart) return;
       const dx = event.clientX - startX;
       const dy = event.clientY - startY;
       if (!suppressFabClick && Math.hypot(dx, dy) >= 6) suppressFabClick = true;
 
       const nextRawX = startOffsetX + dx;
       const nextRawY = startOffsetY + dy;
-      const clamped = clampFabOffset(nextRawX, nextRawY, baseRect);
+      const clamped = clampFabOffset(nextRawX, nextRawY, rectAtStart, startOffset);
       setFabOffset(clamped.x, clamped.y, { persist: false });
     });
 
@@ -292,9 +298,19 @@
 
     const clampOnResize = () => {
       const cur = currentOffset();
-      const rect = widgetEl.getBoundingClientRect();
-      const clamped = clampFabOffset(cur.x, cur.y, rect);
-      setFabOffset(clamped.x, clamped.y, { persist: true });
+      const rect = fab.getBoundingClientRect();
+      const vp = getViewportBox();
+      const padding = 8;
+
+      let dx = 0;
+      let dy = 0;
+      if (rect.left < vp.left + padding) dx = (vp.left + padding) - rect.left;
+      if (rect.right > vp.left + vp.width - padding) dx = (vp.left + vp.width - padding) - rect.right;
+      if (rect.top < vp.top + padding) dy = (vp.top + padding) - rect.top;
+      if (rect.bottom > vp.top + vp.height - padding) dy = (vp.top + vp.height - padding) - rect.bottom;
+
+      if (!dx && !dy) return;
+      setFabOffset(cur.x + dx, cur.y + dy, { persist: true });
     };
 
     window.visualViewport?.addEventListener("resize", clampOnResize, { passive: true });
