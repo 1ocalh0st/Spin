@@ -189,6 +189,25 @@
     return Math.min(max, Math.max(min, value));
   }
 
+  const WEIGHT_SCALE = 100; // 0.01%
+  const WEIGHT_TOTAL_UNITS = 100 * WEIGHT_SCALE; // 100.00%
+  const WEIGHT_STEP = 1 / WEIGHT_SCALE;
+
+  function percentToUnits(value) {
+    const v = clamp(coerceWeight(value, 0), 0, 100);
+    return clamp(Math.round(v * WEIGHT_SCALE), 0, WEIGHT_TOTAL_UNITS);
+  }
+
+  function unitsToPercent(units) {
+    return clamp(coerceWeight(units, 0), 0, WEIGHT_TOTAL_UNITS) / WEIGHT_SCALE;
+  }
+
+  function formatPercent(value) {
+    const v = unitsToPercent(percentToUnits(value));
+    const text = v.toFixed(2).replace(/\.?0+$/, "");
+    return `${text}%`;
+  }
+
   function coerceWeight(value, fallback = 1) {
     const num = Number(value);
     if (!Number.isFinite(num)) return fallback;
@@ -238,28 +257,34 @@
   const anchor = clamp(Math.floor(Number(anchorIndex) || 0), 0, n - 1);
   lastWeightFocus = anchor;
 
-  const sanitized = new Array(n);
-  let sum = 0;
-  let allInts = true;
+  const sanitizedUnits = new Array(n);
+  let sumUnits = 0;
 
   for (let i = 0; i < n; i += 1) {
-    const v = coerceWeight(weights[i], 0);
-    sanitized[i] = v;
-    sum += v;
-    if (!Number.isInteger(v)) allInts = false;
+    const units = percentToUnits(weights[i]);
+    sanitizedUnits[i] = units;
+    sumUnits += units;
   }
 
-  // Fast path: already a valid 0..100 integer distribution.
-  if (sum === 100 && allInts && sanitized.every((v) => v >= 0 && v <= 100)) {
-    weights = sanitized;
+  // Fast path: already a valid 0..100.00 distribution.
+  if (sumUnits === WEIGHT_TOTAL_UNITS && sanitizedUnits.every((v) => v >= 0 && v <= WEIGHT_TOTAL_UNITS)) {
+    const legacyUniform =
+      n > 100 &&
+      sanitizedUnits.every((v) => v === 0 || v === WEIGHT_SCALE) &&
+      sanitizedUnits.filter((v) => v > 0).length === WEIGHT_TOTAL_UNITS / WEIGHT_SCALE;
+    if (legacyUniform) {
+      weights = distributeIntegersEvenly(WEIGHT_TOTAL_UNITS, n).map(unitsToPercent);
+      return;
+    }
+    weights = sanitizedUnits.map(unitsToPercent);
     return;
   }
 
   // If everything is 0 / invalid, fall back to an even distribution,
   // but avoid always biasing toward the first items.
-  if (!(sum > 0)) {
-    const base = Math.floor(100 / n);
-    let extra = 100 - base * n;
+  if (!(sumUnits > 0)) {
+    const base = Math.floor(WEIGHT_TOTAL_UNITS / n);
+    let extra = WEIGHT_TOTAL_UNITS - base * n;
     const out = new Array(n).fill(base);
 
     const order = balanceOrderAll(n, anchor);
@@ -268,7 +293,7 @@
       extra -= 1;
     }
 
-    weights = out;
+    weights = out.map(unitsToPercent);
     return;
   }
 
@@ -278,7 +303,7 @@
   let floorSum = 0;
 
   for (let i = 0; i < n; i += 1) {
-    const raw = (sanitized[i] / sum) * 100;
+    const raw = (sanitizedUnits[i] / sumUnits) * WEIGHT_TOTAL_UNITS;
     const floored = Math.floor(raw);
     floors[i] = floored;
     remainders[i] = raw - floored;
@@ -286,13 +311,13 @@
   }
 
   const out = floors.slice();
-  let diff = 100 - floorSum;
+  let diff = WEIGHT_TOTAL_UNITS - floorSum;
 
   if (diff > 0) {
     const order = Array.from({ length: n }, (_, i) => i).sort((a, b) => {
       const d = remainders[b] - remainders[a];
       if (d !== 0) return d;
-      const w = sanitized[b] - sanitized[a];
+      const w = sanitizedUnits[b] - sanitizedUnits[a];
       if (w !== 0) return w > 0 ? -1 : 1; // bigger weight first
       const da = circularDistance(a, anchor, n);
       const db = circularDistance(b, anchor, n);
@@ -310,7 +335,7 @@
     const order = Array.from({ length: n }, (_, i) => i).sort((a, b) => {
       const d = remainders[a] - remainders[b];
       if (d !== 0) return d;
-      const w = sanitized[a] - sanitized[b];
+      const w = sanitizedUnits[a] - sanitizedUnits[b];
       if (w !== 0) return w < 0 ? -1 : 1; // smaller weight first
       const da = circularDistance(a, anchor, n);
       const db = circularDistance(b, anchor, n);
@@ -326,7 +351,7 @@
     }
   }
 
-  weights = out.map((v) => clamp(v, 0, 100));
+  weights = out.map(unitsToPercent);
 }
 
   function syncWeightsLength() {
@@ -345,96 +370,96 @@
   }
 
   function setWeightPercent(index, nextPercent) {
-  syncWeightsLength();
-  const n = options.length;
-  if (n <= 0) return;
+    syncWeightsLength();
+    const n = options.length;
+    if (n <= 0) return;
 
-  const idx = clamp(Math.floor(Number(index)), 0, n - 1);
-  lastWeightFocus = idx;
-  const target = clamp(Math.round(Number(nextPercent)), 0, 100);
+    const idx = clamp(Math.floor(Number(index)), 0, n - 1);
+    lastWeightFocus = idx;
+    const target = percentToUnits(nextPercent);
 
-  if (n === 1) {
-    weights[0] = 100;
-    return;
-  }
-
-  const out = new Array(n).fill(0);
-  out[idx] = target;
-
-  const remaining = 100 - target;
-  if (!(remaining > 0)) {
-    weights = out;
-    return;
-  }
-
-  const others = [];
-  let otherSum = 0;
-  for (let i = 0; i < n; i += 1) {
-    if (i === idx) continue;
-    const w = coerceWeight(weights[i], 0);
-    others.push({ i, w });
-    otherSum += w;
-  }
-
-  // If other weights are all zero, distribute in a stable "nearby-first" order.
-  if (!(otherSum > 0)) {
-    const order = balanceOrder(n, idx); // excludes idx
-    const base = Math.floor(remaining / (n - 1));
-    let extra = remaining - base * (n - 1);
-
-    for (const i of order) out[i] = base;
-    for (let k = 0; k < order.length && extra > 0; k += 1) {
-      out[order[k]] += 1;
-      extra -= 1;
+    if (n === 1) {
+      weights[0] = 100;
+      return;
     }
 
-    weights = out;
-    return;
-  }
+    const out = new Array(n).fill(0);
+    out[idx] = target;
 
-  // Proportional re-balance, then largest-remainder rounding with stable tie-breaks.
-  const remainders = [];
-  let floorSum = 0;
+    const remaining = WEIGHT_TOTAL_UNITS - target;
+    if (!(remaining > 0)) {
+      weights = out.map(unitsToPercent);
+      return;
+    }
 
-  for (const { i, w } of others) {
-    const raw = (w / otherSum) * remaining;
-    const floored = Math.floor(raw);
-    out[i] = floored;
-    floorSum += floored;
-    remainders.push({ i, r: raw - floored, prev: w });
-  }
+    const others = [];
+    let otherSum = 0;
+    for (let i = 0; i < n; i += 1) {
+      if (i === idx) continue;
+      const w = percentToUnits(weights[i]);
+      others.push({ i, w });
+      otherSum += w;
+    }
 
-  let leftover = remaining - floorSum;
-  remainders.sort((a, b) => {
-    const d = b.r - a.r;
-    if (d !== 0) return d;
-    const w = b.prev - a.prev;
-    if (w !== 0) return w > 0 ? -1 : 1; // bigger previous weight first
-    const da = circularDistance(a.i, idx, n);
-    const db = circularDistance(b.i, idx, n);
-    if (da !== db) return da - db;
-    return a.i - b.i;
-  });
+    // If other weights are all zero, distribute in a stable "nearby-first" order.
+    if (!(otherSum > 0)) {
+      const order = balanceOrder(n, idx); // excludes idx
+      const base = Math.floor(remaining / (n - 1));
+      let extra = remaining - base * (n - 1);
 
-  for (let k = 0; k < remainders.length && leftover > 0; k += 1) {
-    out[remainders[k].i] += 1;
-    leftover -= 1;
-  }
+      for (const i of order) out[i] = base;
+      for (let k = 0; k < order.length && extra > 0; k += 1) {
+        out[order[k]] += 1;
+        extra -= 1;
+      }
 
-  // Safety: if floating errors keep leftover > 0, cycle in the same stable order.
-  if (leftover > 0 && remainders.length) {
-    for (let k = 0; leftover > 0; k = (k + 1) % remainders.length) {
+      weights = out.map(unitsToPercent);
+      return;
+    }
+
+    // Proportional re-balance, then largest-remainder rounding with stable tie-breaks.
+    const remainders = [];
+    let floorSum = 0;
+
+    for (const { i, w } of others) {
+      const raw = (w / otherSum) * remaining;
+      const floored = Math.floor(raw);
+      out[i] = floored;
+      floorSum += floored;
+      remainders.push({ i, r: raw - floored, prev: w });
+    }
+
+    let leftover = remaining - floorSum;
+    remainders.sort((a, b) => {
+      const d = b.r - a.r;
+      if (d !== 0) return d;
+      const w = b.prev - a.prev;
+      if (w !== 0) return w > 0 ? -1 : 1; // bigger previous weight first
+      const da = circularDistance(a.i, idx, n);
+      const db = circularDistance(b.i, idx, n);
+      if (da !== db) return da - db;
+      return a.i - b.i;
+    });
+
+    for (let k = 0; k < remainders.length && leftover > 0; k += 1) {
       out[remainders[k].i] += 1;
       leftover -= 1;
     }
-  }
 
-    weights = out;
+    // Safety: if floating errors keep leftover > 0, cycle in the same stable order.
+    if (leftover > 0 && remainders.length) {
+      for (let k = 0; leftover > 0; k = (k + 1) % remainders.length) {
+        out[remainders[k].i] += 1;
+        leftover -= 1;
+      }
+    }
+
+    weights = out.map(unitsToPercent);
   }
 
   function averageWeights() {
     syncWeightsLength();
-    weights = distributeIntegersEvenly(100, options.length);
+    weights = distributeIntegersEvenly(WEIGHT_TOTAL_UNITS, options.length).map(unitsToPercent);
     refreshWeightPercents();
     scheduleSaveCurrentWheel();
     scheduleLayout();
@@ -497,16 +522,15 @@
     const ranges = optionsListEl.querySelectorAll("[data-weight-range]");
     ranges.forEach((rangeEl) => {
       const idx = Number(rangeEl.getAttribute("data-index") ?? 0);
-      const value = clamp(coerceWeight(weights[idx], 0), 0, 100);
-      rangeEl.value = String(Math.round(value));
+      const value = unitsToPercent(percentToUnits(weights[idx]));
+      rangeEl.value = String(value);
       setRangeFill(rangeEl);
     });
 
     const els = optionsListEl.querySelectorAll("[data-weight-percent]");
     els.forEach((el) => {
       const idx = Number(el.getAttribute("data-index") ?? 0);
-      const value = clamp(coerceWeight(weights[idx], 0), 0, 100);
-      el.textContent = `${Math.round(value)}%`;
+      el.textContent = formatPercent(weights[idx]);
     });
   }
 
@@ -1130,7 +1154,7 @@
       if (seen.has(key)) continue;
       seen.add(key);
       unique.push(item);
-      if (unique.length >= 50) break;
+      if (unique.length >= 400) break;
     }
     return unique;
   }
@@ -1271,7 +1295,7 @@
     while (items.length < 2) items.push({ text: `选项 ${items.length + 1}`, weight: 1 });
 
     const updatedAt = Number.isFinite(Number(raw.updatedAt)) ? Number(raw.updatedAt) : Date.now();
-    return { id, name, items: items.slice(0, 50), updatedAt };
+    return { id, name, items: items.slice(0, 400), updatedAt };
   }
 
   function readWheelLibrary() {
@@ -1446,10 +1470,10 @@
       range.type = "range";
       range.min = "0";
       range.max = "100";
-      range.step = "1";
+      range.step = String(WEIGHT_STEP);
       range.setAttribute("data-weight-range", "true");
       range.setAttribute("data-index", String(idx));
-      range.value = String(Math.round(clamp(coerceWeight(weights[idx], 1), 0, 100)));
+      range.value = String(unitsToPercent(percentToUnits(weights[idx])));
       range.setAttribute("aria-label", `“${initialText}” 概率权重`);
       setRangeFill(range);
 
@@ -1611,31 +1635,53 @@
       }
 
       const label = options[i] ?? `选项 ${i + 1}`;
-      if (span < 0.16) continue;
       const mid = start + span / 2;
-      const labelR = radius * 0.64;
+      const labelAlpha = spinning ? clamp(0.18 + (1 - clamp(omega / 18, 0, 1)) * 0.74, 0.18, 0.92) : 0.92;
+
+      const labelRBase = radius * (n >= 26 ? 0.74 : 0.64);
+      const labelR = n >= 42 ? labelRBase - (i % 2) * radius * 0.10 : labelRBase;
       const x = Math.cos(mid) * labelR;
       const y = Math.sin(mid) * labelR;
 
-      const fontSize = clamp(Math.round(radius * 0.085), 12, 18);
-      const labelAlpha = spinning ? clamp(0.18 + (1 - clamp(omega / 18, 0, 1)) * 0.74, 0.18, 0.92) : 0.92;
+      const chord = 2 * labelR * Math.sin(span / 2);
+      const estimateChars = (fontPx) => Math.floor((chord * 0.96) / Math.max(1, fontPx * 0.92));
+      const desiredChars = n >= 46 ? 2 : n >= 34 ? 3 : n >= 22 ? 4 : 10;
+      let fontSize = clamp(Math.round(radius * 0.085), 10, 18);
+      while (fontSize > 8 && estimateChars(fontSize) < desiredChars) fontSize -= 1;
+
+      const maxChars = clamp(estimateChars(fontSize), 1, 10);
+      let text = String(label ?? "").trim();
+      if (!text) text = `选项 ${i + 1}`;
+      if (text.length > maxChars) {
+        text = maxChars <= 1 ? text.slice(0, 1) : `${text.slice(0, maxChars - 1)}…`;
+      }
 
       ctx.save();
-      ctx.font = `600 ${fontSize}px system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial, sans-serif`;
+      ctx.font = `650 ${fontSize}px system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial, sans-serif`;
       ctx.fillStyle = "rgba(255,255,255,1)";
       ctx.globalAlpha = labelAlpha;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
 
-      const maxChars = 10;
-      const text = label.length > maxChars ? `${label.slice(0, maxChars - 1)}…` : label;
       ctx.lineJoin = "round";
-      ctx.lineWidth = Math.max(2, fontSize * 0.22);
-      ctx.strokeStyle = "rgba(0,0,0,0.28)";
+      ctx.lineWidth = Math.max(1.5, fontSize * 0.24);
+      ctx.strokeStyle = "rgba(0,0,0,0.32)";
       ctx.strokeText(text, x, y);
       ctx.fillText(text, x, y);
       ctx.restore();
     }
+
+    ctx.save();
+    ctx.globalCompositeOperation = "multiply";
+    const shade = ctx.createRadialGradient(0, 0, radius * 0.18, 0, 0, radius);
+    shade.addColorStop(0.0, "rgba(0,0,0,0)");
+    shade.addColorStop(0.62, "rgba(0,0,0,0.10)");
+    shade.addColorStop(1.0, "rgba(0,0,0,0.34)");
+    ctx.fillStyle = shade;
+    ctx.beginPath();
+    ctx.arc(0, 0, radius, 0, tau);
+    ctx.fill();
+    ctx.restore();
 
     const innerGrad = ctx.createRadialGradient(-radius * 0.25, -radius * 0.35, radius * 0.2, 0, 0, radius);
     innerGrad.addColorStop(0.0, "rgba(255,255,255,0.22)");
@@ -1648,8 +1694,10 @@
     ctx.fill();
 
     const ringGrad = ctx.createRadialGradient(0, 0, radius * 0.9, 0, 0, radius * 1.03);
-    ringGrad.addColorStop(0.0, "rgba(255,255,255,0.10)");
-    ringGrad.addColorStop(0.55, "rgba(255,255,255,0.28)");
+    ringGrad.addColorStop(0.0, "rgba(255,255,255,0.08)");
+    ringGrad.addColorStop(0.35, "rgba(255,220,170,0.18)");
+    ringGrad.addColorStop(0.55, "rgba(255,255,255,0.26)");
+    ringGrad.addColorStop(0.78, "rgba(0,0,0,0.22)");
     ringGrad.addColorStop(1.0, "rgba(255,255,255,0.08)");
 
     ctx.strokeStyle = ringGrad;
@@ -1659,6 +1707,42 @@
     ctx.beginPath();
     ctx.arc(0, 0, radius * 0.97, 0, tau);
     ctx.stroke();
+
+    ctx.shadowBlur = 0;
+    ctx.lineWidth = Math.max(1.2, radius * 0.008);
+    ctx.strokeStyle = "rgba(255,255,255,0.22)";
+    ctx.beginPath();
+    ctx.arc(0, 0, radius * 0.94, 0, tau);
+    ctx.stroke();
+
+    const rimHighlight = ctx.createLinearGradient(-radius, -radius, radius, radius);
+    rimHighlight.addColorStop(0.0, "rgba(255,255,255,0.18)");
+    rimHighlight.addColorStop(0.35, "rgba(255,235,200,0.22)");
+    rimHighlight.addColorStop(1.0, "rgba(255,255,255,0.10)");
+    ctx.strokeStyle = rimHighlight;
+    ctx.beginPath();
+    ctx.arc(0, 0, radius * 0.995, 0, tau);
+    ctx.stroke();
+
+    const hubR = radius * 0.16;
+    const hubGrad = ctx.createRadialGradient(-hubR * 0.25, -hubR * 0.3, hubR * 0.08, 0, 0, hubR);
+    hubGrad.addColorStop(0.0, "rgba(255,255,255,0.30)");
+    hubGrad.addColorStop(0.45, "rgba(255,220,170,0.16)");
+    hubGrad.addColorStop(1.0, "rgba(0,0,0,0.22)");
+    ctx.save();
+    ctx.shadowColor = "rgba(0,0,0,0.32)";
+    ctx.shadowBlur = 12;
+    ctx.fillStyle = hubGrad;
+    ctx.beginPath();
+    ctx.arc(0, 0, hubR, 0, tau);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.lineWidth = Math.max(2, hubR * 0.14);
+    ctx.strokeStyle = "rgba(255,255,255,0.18)";
+    ctx.beginPath();
+    ctx.arc(0, 0, hubR * 0.92, 0, tau);
+    ctx.stroke();
+    ctx.restore();
 
     ctx.restore();
 
