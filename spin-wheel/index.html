@@ -20,8 +20,11 @@
       <div class="brand">
         <div class="logo" aria-hidden="true"></div>
         <div class="titles">
-          <div class="title">转盘</div>
-          <div class="subtitle">转一下吧！</div>
+          <div class="title-row">
+            <label for="wheelTitle" class="sr-only">转盘名称</label>
+            <input id="wheelTitle" class="wheel-title" type="text" maxlength="40" value="转盘" />
+          </div>
+          <!-- <div class="subtitle">转一下吧！</div> -->
         </div>
       </div>
 
@@ -81,8 +84,10 @@
           <button id="addOption" class="secondary-btn" type="button">添加</button>
           <button id="panelActionsMore" class="secondary-btn panel-more-btn" type="button" aria-haspopup="dialog"
             aria-expanded="false" aria-controls="panelActionsDialog" aria-label="更多操作">⋯</button>
-          <button id="panelToggle" class="secondary-btn" type="button" aria-controls="panelBody"
-            aria-expanded="true">收起</button>
+          <button id="panelToggle" class="panel-toggle-btn" type="button" aria-controls="panelBody" aria-expanded="true"
+            aria-label="收起面板" title="收起/展开">
+            <span class="chevron" aria-hidden="true">⌄</span>
+          </button>
         </div>
       </div>
 

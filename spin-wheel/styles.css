@@ -88,15 +88,41 @@ body {
   justify-self: center;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
   padding: 12px 12px;
   border-radius: 18px;
+  position: relative;
 }
 
 .brand {
+  flex: 1;
   display: flex;
   align-items: center;
-  gap: 12px;
+  justify-content: center;
+  min-width: 0;
+  position: relative;
+  padding-left: 48px;
+  padding-right: 54px;
+}
+
+.brand .logo {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.titles {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  align-items: center;
+}
+
+.title-row {
+  display: flex;
+  align-items: center;
+  min-width: 0;
 }
 
 .logo {
@@ -118,6 +144,42 @@ body {
   letter-spacing: 0.2px;
 }
 
+.wheel-title {
+  font: inherit;
+  font-weight: 650;
+  letter-spacing: 0.2px;
+  font-size: 21px;
+  color: var(--text);
+  width: min(440px, 62vw);
+  min-width: 120px;
+  max-width: 100%;
+  padding: 2px 6px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: transparent;
+  outline: none;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 520px) {
+  .wheel-title {
+    font-size: 19px;
+  }
+}
+
+.wheel-title:hover {
+  border-color: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.wheel-title:focus {
+  border-color: rgba(255, 255, 255, 0.34);
+  background: rgba(255, 255, 255, 0.10);
+}
+
 .subtitle {
   font-size: 12px;
   color: var(--muted);
@@ -127,6 +189,10 @@ body {
 .top-actions {
   display: flex;
   gap: 8px;
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
 }
 
 .icon-btn {
@@ -171,6 +237,8 @@ body {
   gap: 14px;
   min-height: 0;
   padding: 4px 0;
+  position: relative;
+  z-index: 1;
 }
 
 .wheel-stage {
@@ -338,6 +406,7 @@ canvas {
   justify-self: center;
   border-radius: 22px;
   position: relative;
+  z-index: 6;
   padding: 22px 14px 14px;
   display: grid;
   grid-template-rows: auto 1fr;
@@ -373,8 +442,15 @@ canvas {
 }
 
 .panel.collapsed {
-  --panel-vh: var(--panel-collapsed);
-  padding: 18px 14px 14px;
+  max-height: 44px;
+  width: auto;
+  justify-self: end;
+  padding: 0;
+  overflow: visible;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  backdrop-filter: none;
 }
 
 .panel.collapsed .panel-body {
@@ -388,6 +464,7 @@ canvas {
 
 .panel.collapsed .panel-head {
   justify-content: flex-end;
+  height: 44px;
 }
 
 .panel.collapsed .panel-drag-handle {
@@ -497,10 +574,43 @@ canvas {
   background: rgba(0, 0, 0, 0.12);
 }
 
-#panelToggle {
-  padding: 8px 12px;
+.panel-toggle-btn {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border: 0;
   border-radius: 14px;
-  font-size: 12px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.74);
+  cursor: pointer;
+  transition: transform 140ms var(--ease), background 140ms var(--ease), color 140ms var(--ease);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.panel-toggle-btn:hover {
+  transform: translateY(-1px);
+  background: rgba(255, 255, 255, 0.10);
+  color: var(--text);
+}
+
+.panel-toggle-btn:active {
+  transform: translateY(0);
+}
+
+.panel-toggle-btn:focus-visible {
+  outline: 2px solid rgba(167, 139, 250, 0.62);
+  outline-offset: 2px;
+}
+
+.panel-toggle-btn .chevron {
+  font-size: 18px;
+  line-height: 1;
+  transition: transform 180ms var(--ease);
+}
+
+.panel.collapsed .panel-toggle-btn .chevron {
+  transform: rotate(180deg);
 }
 
 .options {
@@ -736,17 +846,33 @@ canvas {
 }
 
 .fab {
-  width: 86px;
-  height: 86px;
-  border-radius: 30px;
+  width: 88px;
+  height: 88px;
+  border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.22);
   background:
-    radial-gradient(40px 40px at 35% 30%, rgba(255, 255, 255, 0.62), transparent 60%),
-    linear-gradient(135deg, rgba(167, 139, 250, 0.52), rgba(94, 234, 212, 0.34), rgba(253, 186, 116, 0.26));
-  box-shadow: 0 22px 52px rgba(0, 0, 0, 0.55);
-  color: rgba(10, 10, 18, 0.96);
+    radial-gradient(44px 44px at 30% 25%, rgba(255, 255, 255, 0.28), transparent 60%),
+    radial-gradient(64px 64px at 70% 80%, rgba(94, 234, 212, 0.22), transparent 62%),
+    linear-gradient(135deg, rgba(167, 139, 250, 0.30), rgba(94, 234, 212, 0.22), rgba(253, 186, 116, 0.16));
+  box-shadow: 0 20px 52px rgba(0, 0, 0, 0.58), inset 0 0 0 1px rgba(255, 255, 255, 0.10);
+  color: var(--text);
   cursor: pointer;
+  position: relative;
+  overflow: hidden;
   transition: transform 160ms var(--ease), filter 160ms var(--ease);
+}
+
+.fab::before {
+  content: "";
+  position: absolute;
+  inset: -18px;
+  background:
+    radial-gradient(40px 40px at 30% 30%, rgba(167, 139, 250, 0.55), transparent 70%),
+    radial-gradient(46px 46px at 70% 75%, rgba(94, 234, 212, 0.42), transparent 72%),
+    radial-gradient(40px 40px at 90% 35%, rgba(253, 186, 116, 0.32), transparent 72%);
+  filter: blur(16px);
+  opacity: 0.38;
+  pointer-events: none;
 }
 
 .fab:hover {
@@ -764,9 +890,12 @@ canvas {
 }
 
 .fab-label {
-  font-weight: 750;
-  letter-spacing: 0.9px;
-  font-size: 13px;
+  position: relative;
+  z-index: 1;
+  font-weight: 720;
+  letter-spacing: 0.4px;
+  font-size: 14px;
+  text-shadow: 0 10px 18px rgba(0, 0, 0, 0.35);
 }
 
 dialog.import-dialog {

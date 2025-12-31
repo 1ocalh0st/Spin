@@ -20,6 +20,7 @@
   const spinAgain = document.getElementById("spinAgain");
   const audioToggle = document.getElementById("audioToggle");
   const audioIcon = document.getElementById("audioIcon");
+  const wheelTitleEl = document.getElementById("wheelTitle");
 
   const optionsListEl = document.getElementById("optionsList");
   const addOptionBtn = document.getElementById("addOption");
@@ -118,6 +119,9 @@
     "逛博物馆",
   ];
   let weights = options.map(() => 1);
+
+  const DEFAULT_WHEEL_NAME = "转盘";
+  let currentWheelName = DEFAULT_WHEEL_NAME;
 
   let lastWeightFocus = 0;
 
@@ -546,8 +550,9 @@
   function setPanelCollapsed(collapsed, persist = false) {
     panelCollapsed = Boolean(collapsed);
     panelEl.classList.toggle("collapsed", panelCollapsed);
-    panelToggle.textContent = panelCollapsed ? "展开" : "收起";
     panelToggle.setAttribute("aria-expanded", panelCollapsed ? "false" : "true");
+    panelToggle.setAttribute("aria-label", panelCollapsed ? "展开面板" : "收起面板");
+    panelToggle.setAttribute("title", panelCollapsed ? "展开" : "收起");
     if (persist) writeStoredBool(PANEL_COLLAPSED_KEY, panelCollapsed);
     closePanelActionsDialog(false);
     if (panelCollapsed) applyPanelMin();
@@ -1181,10 +1186,24 @@
     if (audioIcon && audioIcon.textContent !== "♪") audioIcon.textContent = "♪";
   }
 
+  function normalizeWheelName(name) {
+    const trimmed = String(name ?? "").trim();
+    return trimmed || DEFAULT_WHEEL_NAME;
+  }
+
+  function applyWheelName(name, persist = false) {
+    const normalized = normalizeWheelName(name);
+    currentWheelName = normalized;
+    if (wheelTitleEl && wheelTitleEl.value !== normalized) wheelTitleEl.value = normalized;
+    if (wheelNameEl && wheelNameEl.value !== normalized) wheelNameEl.value = normalized;
+    if (document.title !== normalized) document.title = normalized;
+    if (persist) scheduleSaveCurrentWheel();
+  }
+
   function saveCurrentWheelNow() {
     try {
       const items = currentWheelItems();
-      localStorage.setItem(CURRENT_WHEEL_KEY, JSON.stringify({ items, updatedAt: Date.now() }));
+      localStorage.setItem(CURRENT_WHEEL_KEY, JSON.stringify({ items, name: currentWheelName, updatedAt: Date.now() }));
     } catch {
       // ignore
     }
@@ -1205,6 +1224,9 @@
       const parsed = JSON.parse(raw);
       const items = Array.isArray(parsed?.items) ? parsed.items : Array.isArray(parsed) ? parsed : null;
       if (!items) return false;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && typeof parsed.name === "string") {
+        applyWheelName(parsed.name, false);
+      }
       applyWheelItems(items);
       return true;
     } catch {
@@ -1353,6 +1375,7 @@
 
     populateWheelSelect(id);
     setWheelMessage(existing ? "已更新该转盘。" : "已保存到转盘库。", "ok");
+    applyWheelName(name, true);
   }
 
   function loadWheelFromDialog() {
@@ -1368,7 +1391,7 @@
       return;
     }
     applyWheelItems(wheel.items);
-    wheelNameEl && (wheelNameEl.value = wheel.name);
+    applyWheelName(wheel.name, true);
     setWheelMessage(`已载入：${wheel.name}`, "ok");
   }
 
@@ -1765,6 +1788,7 @@
     const data = {
       options,
       weights,
+      wheelName: currentWheelName,
       panelSize: localStorage.getItem(PANEL_SIZE_KEY),
       audioEnabled: localStorage.getItem(AUDIO_ENABLED_KEY),
       soundMode: localStorage.getItem(SOUND_MODE_KEY),
@@ -1790,7 +1814,7 @@
     const selectedId = String(wheelSelectEl?.value ?? "");
     populateWheelSelect(selectedId);
     const wheel = wheelById(String(wheelSelectEl?.value ?? ""));
-    if (wheelNameEl) wheelNameEl.value = wheel?.name ?? "";
+    if (wheelNameEl) wheelNameEl.value = wheel?.name ?? currentWheelName;
     if (typeof wheelDialog?.showModal === "function") wheelDialog.showModal();
     else wheelDialog?.setAttribute("open", "true");
   }
@@ -1799,6 +1823,24 @@
     spinFab.addEventListener("click", () => {
       if (spinning) return;
       startSpin();
+    });
+
+    wheelTitleEl?.addEventListener("input", () => {
+      const raw = wheelTitleEl.value;
+      currentWheelName = normalizeWheelName(raw);
+      if (document.title !== currentWheelName) document.title = currentWheelName;
+      if (wheelNameEl && !wheelNameEl.matches(":focus") && wheelNameEl.value !== raw) wheelNameEl.value = raw;
+      scheduleSaveCurrentWheel();
+    });
+
+    wheelTitleEl?.addEventListener("blur", () => {
+      applyWheelName(wheelTitleEl.value, true);
+    });
+
+    wheelTitleEl?.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      wheelTitleEl.blur();
     });
 
     confirmResult?.addEventListener("click", () => {
@@ -1861,6 +1903,9 @@
           localStorage.setItem(SOUND_MODE_KEY, soundMode);
           if (soundModeSelect) soundModeSelect.value = soundMode;
         }
+        if (typeof data.wheelName === "string") {
+          applyWheelName(data.wheelName, true);
+        }
 
         alert("导入成功！");
       } catch (e) {
@@ -1882,6 +1927,18 @@
       setWheelMessage("");
       const wheel = wheelById(String(wheelSelectEl.value ?? ""));
       if (wheelNameEl) wheelNameEl.value = wheel?.name ?? "";
+    });
+
+    wheelNameEl?.addEventListener("input", () => {
+      const raw = wheelNameEl.value;
+      currentWheelName = normalizeWheelName(raw);
+      if (document.title !== currentWheelName) document.title = currentWheelName;
+      if (wheelTitleEl && !wheelTitleEl.matches(":focus") && wheelTitleEl.value !== raw) wheelTitleEl.value = raw;
+      scheduleSaveCurrentWheel();
+    });
+
+    wheelNameEl?.addEventListener("blur", () => {
+      applyWheelName(wheelNameEl.value, true);
     });
 
     wheelNameEl?.addEventListener("keydown", (event) => {
@@ -2082,6 +2139,8 @@
   setAudioToggleUi(audioEnabled);
   soundMode = localStorage.getItem(SOUND_MODE_KEY) || "default";
   if (soundModeSelect) soundModeSelect.value = soundMode;
+
+  applyWheelName(wheelTitleEl?.value ?? DEFAULT_WHEEL_NAME, false);
 
   const restored = loadCurrentWheel();
   if (!restored) renderOptionsList();

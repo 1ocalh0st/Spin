@@ -315,6 +315,7 @@
 
     window.visualViewport?.addEventListener("resize", clampOnResize, { passive: true });
     window.addEventListener("resize", clampOnResize, { passive: true });
+    requestAnimationFrame(clampOnResize);
   })();
 
   document.addEventListener("keydown", (event) => {
