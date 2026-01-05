@@ -558,7 +558,7 @@
     const availableH = Math.max(120, rect.height - btnRect.height - gap);
     const base = Math.min(rect.width, availableH);
     if (!Number.isFinite(base) || base <= 0) return;
-    const size = Math.min(base * 0.98, 620);
+    const size = Math.min(base * 0.98, 750);
     document.documentElement.style.setProperty("--wheel-size", `${Math.floor(size)}px`);
   }
 
@@ -1644,16 +1644,27 @@
       const y = Math.sin(mid) * labelR;
 
       const chord = 2 * labelR * Math.sin(span / 2);
-      const estimateChars = (fontPx) => Math.floor((chord * 0.96) / Math.max(1, fontPx * 0.92));
-      const desiredChars = n >= 46 ? 2 : n >= 34 ? 3 : n >= 22 ? 4 : 10;
-      let fontSize = clamp(Math.round(radius * 0.085), 10, 18);
-      while (fontSize > 8 && estimateChars(fontSize) < desiredChars) fontSize -= 1;
-
-      const maxChars = clamp(estimateChars(fontSize), 1, 10);
       let text = String(label ?? "").trim();
       if (!text) text = `选项 ${i + 1}`;
-      if (text.length > maxChars) {
-        text = maxChars <= 1 ? text.slice(0, 1) : `${text.slice(0, maxChars - 1)}…`;
+
+      const avgSpan = tau / n;
+      const spanScale = clamp(Math.sqrt(span / avgSpan), 0.72, 1.38);
+      const estimateChars = (fontPx) => Math.floor((chord * 0.96) / Math.max(1, fontPx * 0.92));
+
+      const minFontSize = 7;
+      const maxFontSize = 24;
+      let fontSize = clamp(Math.round(radius * 0.092 * spanScale), 10, maxFontSize);
+
+      const preferredLines = span < avgSpan * 0.6 ? 3 : 2;
+      for (; fontSize > minFontSize; fontSize -= 1) {
+        const perLine = estimateChars(fontSize);
+        if (perLine >= 1 && Math.ceil(text.length / perLine) <= preferredLines) break;
+      }
+
+      const charsPerLine = Math.max(1, estimateChars(fontSize));
+      const lines = [];
+      for (let startIdx = 0; startIdx < text.length; startIdx += charsPerLine) {
+        lines.push(text.slice(startIdx, startIdx + charsPerLine));
       }
 
       ctx.save();
@@ -1666,8 +1677,13 @@
       ctx.lineJoin = "round";
       ctx.lineWidth = Math.max(1.5, fontSize * 0.24);
       ctx.strokeStyle = "rgba(0,0,0,0.32)";
-      ctx.strokeText(text, x, y);
-      ctx.fillText(text, x, y);
+      const lineHeight = fontSize * (lines.length >= 3 ? 1.02 : 1.1);
+      const yStart = y - ((lines.length - 1) * lineHeight) / 2;
+      for (let li = 0; li < lines.length; li += 1) {
+        const yy = yStart + li * lineHeight;
+        ctx.strokeText(lines[li], x, yy);
+        ctx.fillText(lines[li], x, yy);
+      }
       ctx.restore();
     }
 

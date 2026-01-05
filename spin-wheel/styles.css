@@ -244,8 +244,8 @@ body {
 .wheel-stage {
   isolation: isolate;
   position: relative;
-  width: var(--wheel-size, min(96vw, 620px));
-  height: var(--wheel-size, min(96vw, 620px));
+  width: var(--wheel-size, min(96vw, 720px));
+  height: var(--wheel-size, min(96vw, 720px));
   display: grid;
   place-items: center;
   border-radius: 28px;
